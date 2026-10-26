@@ -139,7 +139,7 @@ var communityStories = []CommunityStory{
 
 func pm(id, name, ws string) CommunityMod { return CommunityMod{ID: id, Name: name, WS: ws} }
 
-// Mods that exist on Dan's machine use their real ids; the rest are known Workshop mods with no id
+// Some mods use their real Workshop ids; the rest are known Workshop mods with no id
 // here, so the browser offers a Workshop search for them.
 var (
 	cmZB         = pm("ZombieBuddy", "ZombieBuddy", "3619862853")

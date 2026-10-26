@@ -15,7 +15,7 @@ import (
 // The community server (Cloudflare Worker, source in easyhost/community-server). Anyone can read
 // it; uploading, liking and commenting send a Steam ticket so the server knows who you are.
 
-const communityServer = "https://knox-community.daniel-cahill1999.workers.dev" // Dan's Cloudflare worker; Settings can override it
+const communityServer = "https://knox-community.daniel-cahill1999.workers.dev" // the Cloudflare worker in server/; Settings can override it
 
 type remoteItem struct {
 	ID        string          `json:"id"`
