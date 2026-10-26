@@ -1,0 +1,9 @@
+name=Knox Link
+id=KnoxLink
+author=Dan
+description=The in-game half of Knox Launcher (Easy Zomboid Servers): hosts and joins straight from the launcher, fills in the character you made there, spawns everyone together, and still offers one-click HOST WITH MODS from the main menu.
+category=features
+versionMin=42.0
+javaJarFile=media/java/client/KnoxLink.jar
+javaPkgName=knoxlink.client
+poster=poster.png

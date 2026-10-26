@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, author TEXT, author_id TEXT NOT NULL, about TEXT, tags TEXT, data TEXT, downloads INTEGER DEFAULT 0, likes INTEGER DEFAULT 0, comments INTEGER DEFAULT 0, reports INTEGER DEFAULT 0, hidden INTEGER DEFAULT 0, created INTEGER, updated INTEGER);
+CREATE INDEX IF NOT EXISTS items_kind ON items (kind, hidden, updated);
+CREATE INDEX IF NOT EXISTS items_author ON items (author_id, created);
+CREATE TABLE IF NOT EXISTS likes (item TEXT, user TEXT, PRIMARY KEY (item, user));
+CREATE TABLE IF NOT EXISTS downloads (item TEXT, user TEXT, PRIMARY KEY (item, user));
+CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT, author TEXT, author_id TEXT, text TEXT, created INTEGER);
+CREATE INDEX IF NOT EXISTS comments_item ON comments (item, created);
+CREATE TABLE IF NOT EXISTS reports (item TEXT, user TEXT, reason TEXT, created INTEGER, PRIMARY KEY (item, user));
+CREATE TABLE IF NOT EXISTS sessions (ticket TEXT PRIMARY KEY, user TEXT, name TEXT, expires INTEGER);
+CREATE TABLE IF NOT EXISTS bans (user TEXT PRIMARY KEY, created INTEGER);

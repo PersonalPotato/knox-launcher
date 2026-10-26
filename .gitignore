@@ -1,0 +1,11 @@
+# build output
+*.exe
+launcher/ezhost
+dist/
+# mod jars are built locally with mod/src/build.sh
+mod/KnoxLink/42/media/java/**/*.jar
+# local data
+launcher/devdata/
+*.log
+.DS_Store
+Thumbs.db
