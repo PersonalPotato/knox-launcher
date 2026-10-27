@@ -55,3 +55,5 @@ func hidden(cmd *exec.Cmd) *exec.Cmd { return cmd }
 func tieToLauncher(p *os.Process, pidFile string) {}
 
 func killOrphanServers(pidFile string) int { return 0 }
+
+func memoryLine() string { return "memory: unknown" }

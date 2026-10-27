@@ -90,6 +90,7 @@ func (a *App) watch() {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	n := 0
+	last := time.Now()
 	for {
 		select {
 		case <-tick.C:
@@ -97,6 +98,15 @@ func (a *App) watch() {
 			time.Sleep(300 * time.Millisecond) // let Steam finish writing the folder
 		}
 		n++
+		// a long gap here means this whole PC stopped for a while (on 10-27 the launcher, the server
+		// and the game all froze for 30 s at once and everyone was dropped): log it with the memory
+		if gap := time.Since(last); gap > 5*time.Second {
+			log.Printf("launcher was stalled for %v; %s", gap.Round(time.Second), memoryLine())
+		}
+		last = time.Now()
+		if n%30 == 0 && (a.server.get().Running || gameRunning()) {
+			log.Println(memoryLine())
+		}
 		a.cat.Refresh(false)
 		if a.lobby.ID() != 0 {
 			a.publishHostInfo()
