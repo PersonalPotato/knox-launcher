@@ -669,6 +669,7 @@ func (s *CatalogStore) scanMods(game string) []ModInfo {
 			m.Removed = true
 		}
 		m.roots = roots
+		m.translation = m.Broken == "" && isTranslationMod(roots)
 		found = append(found, m)
 	}
 	// local mods: Zomboid/mods/<Folder>
