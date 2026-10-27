@@ -299,7 +299,8 @@ type HostInfo struct {
 	SquadName   string            `json:"squadName,omitempty"`
 	Lives       int               `json:"lives,omitempty"`
 	LivesShared bool              `json:"livesShared,omitempty"`
-	Cast        *WorldCast        `json:"cast,omitempty"` // who's in this world already (continuing a tape)
+	Cast        *WorldCast        `json:"cast,omitempty"`  // who's in this world already (continuing a tape)
+	Goals       *WorldGoals       `json:"goals,omitempty"` // Knox goals of this world (goals.go)
 }
 
 func (a *App) hostInfo() HostInfo {
@@ -311,6 +312,7 @@ func (a *App) hostInfo() HostInfo {
 	info.Lives, info.LivesShared = h.Lives, h.LivesShared
 	if !info.NewWorld {
 		info.Cast = a.castFor(h.World)
+		info.Goals = a.goalsFor(h.World)
 	}
 	info.SquadName = h.SquadName
 	info.Story = a.userStory(h.Backstory)
@@ -733,12 +735,13 @@ func (a *App) hostLaunch(expected int, launchID string) error {
 	// lives, lives mode, world. Continuing a tape doesn't wait for everyone: people drop back in where they were.
 	lives, livesMode := livesText(h)
 	lobby := []string{boolText(h.Lobby && !continuing), town, strconv.Itoa(expected), kitText(h.Kit), respawn, spawn, strings.Join(spots, ";"),
-		lives, livesMode, h.World}
+		lives, livesMode, h.World, goalTier(h.Difficulty), h.Backstory}
 	if err := a.writeBridge("lobby.txt", strings.Join(lobby, "\r\n")+"\r\n"); err != nil {
 		return err
 	}
 	_ = a.writeBridge("app_recap.json", "")
 	_ = a.writeBridge("app_cast.json", "")
+	_ = a.writeBridge("app_goals.json", "")
 	_ = a.writeBridge("app_status.json", "")
 	_ = a.writeBridge("app_commands.txt", "")
 	_ = a.writeBridge("app_launch.txt", "")

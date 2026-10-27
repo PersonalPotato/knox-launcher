@@ -8,6 +8,7 @@ import { PreviouslyOn } from "./prev.js";
 import { JavaBanner } from "./mods.js";
 import { SquadPoster, SquadTitle, PosterFig } from "./poster.js";
 import { frameOf, wornOf, lookOf } from "./looks.js";
+import { GoalsCard } from "./goals.js";
 import { sound } from "./sound.js";
 import { LevelTag, BadgeShelf, knoxOf } from "./knox.js";
 import { TapeHome, ejectTape } from "./tapes.js";
@@ -201,6 +202,7 @@ function Lobby() {
     ${list.length > 1 ? html`<div class="blockers">${list.slice(0, -1).map((b) => html`<div key=${b} class="blocker">⚠ ${b}</div>`)}</div>` : null}
     <div class=${"lobby-grid" + (st.host ? " one" : "")}>
       <div class="grid">
+        ${info && info.goals ? html`<${GoalsCard} goals=${info.goals} title="Goals on this world" lasting=${!(st.game && st.game.running)} />` : null}
         ${info && info.cast ? html`<${PreviouslyOn} cast=${info.cast} world=${info.world} />` : null}
         ${story ? html`<${ChosenStory} story=${story} info=${info} />` : st.host ? html`<div class="card row"><span class="grow muted">No story picked.</span><button class="btn sm" onClick=${() => update({ tab: "character" })}>Pick a story</button></div>` : null}
         <${Chat} />

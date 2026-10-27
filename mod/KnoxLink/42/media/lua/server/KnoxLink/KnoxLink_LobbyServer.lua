@@ -5,12 +5,13 @@
 --   line 5: respawn rule (base | squad | random), line 6: start building "x,y,z",
 --   line 7: houses for random respawns "x,y,z;x,y,z;..."
 --   line 8: lives (0 = unlimited), line 9: "each" or "squad" (one shared pool of spare lives),
---   line 10: world name
+--   line 10: world name, line 11: goal tier (easy | normal | hard), line 12: story id
 -- We read it once at startup and clear it.
 -- While running, the server also writes app_status.json, app_recap.json and app_cast.json for the Knox Launcher.
 -- The cast (everyone who ever played this world, alive or dead, lives used) is kept in the world's ModData.
 if not isServer() then return end
 require "KnoxLink/KnoxLink_Json"
+require "KnoxLink/KnoxLink_Goals"
 
 local MODULE = "KnoxLink"
 local COUNTDOWN_MS = 5000
@@ -34,7 +35,8 @@ local function readFlag()
     local expected = reader:readLine()
     local kit = reader:readLine()
     local respawn = { rule = reader:readLine(), base = reader:readLine(), spots = reader:readLine(),
-        lives = reader:readLine(), livesMode = reader:readLine(), world = reader:readLine() }
+        lives = reader:readLine(), livesMode = reader:readLine(), world = reader:readLine(),
+        difficulty = reader:readLine(), story = reader:readLine() }
     reader:close()
     return open ~= nil and open:gsub("%s", "") == "1", town or "", tonumber(expected or "") or 0, kit or "", respawn
 end
@@ -141,8 +143,12 @@ Events.OnInitGlobalModData.Add(function()
         if lives then data.lives = math.max(0, math.floor(lives)) end
         if respawn.livesMode and respawn.livesMode ~= "" then data.livesMode = respawn.livesMode:gsub("%s", "") end
         if respawn.world and respawn.world ~= "" then data.world = respawn.world end
+        if respawn.difficulty and respawn.difficulty ~= "" then data.difficulty = respawn.difficulty:gsub("%s", "") end
+        if respawn.story then data.story = respawn.story:gsub("%s", "") end
     end
     data.cast = data.cast or {}
+    local gok, gerr = pcall(KnoxGoals.init, data)
+    if not gok then print("[KnoxLink] goals error: " .. tostring(gerr)) end
     clearFlag()
     print("[KnoxLink] lobby " .. (data.open and "open" or "off") .. (expected > 0 and (", waiting for " .. expected .. " players") or ""))
 end)
@@ -201,6 +207,7 @@ local function markDead(user, player)
     c.banked = (c.banked or 0) + kills
     c.kills = c.banked
     table.insert(c.died, { day = today(), name = c.display or user, hours = hours, kills = kills })
+    pcall(KnoxGoals.died)
     print("[KnoxLink] " .. user .. " died (" .. c.deaths .. " deaths)")
 end
 
@@ -343,7 +350,11 @@ Events.OnClientCommand.Add(function(module, command, player, args)
         if args and args.isHost then data.host = name end
         local ok, err = pcall(meetCharacter, player, args)
         if not ok then print("[KnoxLink] cast error: " .. tostring(err)) end
+        pcall(KnoxGoals.meet, name)
         broadcast()
+    elseif command == "track" then
+        -- what this player did since their last report (goals and launcher stats)
+        pcall(KnoxGoals.track, name, args)
     elseif command == "look" then
         -- what this survivor is wearing now; the launcher draws the cast with it
         local c = data.cast and data.cast[name]
@@ -416,6 +427,8 @@ local function writeStatus()
             end
             rec.hours = safe(function() return p:getHoursSurvived() end) or rec.hours
             rec.lastSeen = getTimestamp()
+            pcall(KnoxGoals.kills, user, rec.kills)
+            pcall(KnoxGoals.position, user, p:getX(), p:getY(), dead)
             table.insert(list, {
                 name = user,
                 display = tostring(safe(function() return p:getDisplayName() end) or user),
@@ -437,9 +450,14 @@ local function writeStatus()
         players = list,
     })
     local recap = KnoxLinkJson.array()
+    pcall(KnoxGoals.tick)
     for _, rec in pairs(session.players) do
-        table.insert(recap, { name = rec.name, kills = rec.kills, deaths = rec.deaths, hours = rec.hours, firstSeen = rec.firstSeen, lastSeen = rec.lastSeen or rec.firstSeen })
+        local ok, goals, track = pcall(KnoxGoals.forPlayer, rec.name)
+        table.insert(recap, { name = rec.name, kills = rec.kills, deaths = rec.deaths, hours = rec.hours, firstSeen = rec.firstSeen, lastSeen = rec.lastSeen or rec.firstSeen,
+            goals = ok and goals or nil, track = ok and track or nil })
     end
+    local gs = KnoxGoals.state()
+    if gs then KnoxLinkJson.write("app_goals.json", gs) end
     KnoxLinkJson.write("app_recap.json", { started = session.started, updated = getTimestamp(), day = day, players = recap })
     if data and data.cast then pcall(writeCast, day) end
 end

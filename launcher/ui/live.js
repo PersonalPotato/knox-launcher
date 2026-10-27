@@ -1,5 +1,6 @@
 // The live game: shown while Project Zomboid is open, and a recap after it closes.
 import { html, useState, useEffect, S, rpc, act, toast, update } from "./core.js";
+import { GoalsCard, trackLine } from "./goals.js";
 
 function townOf(x, y) {
   let best = "", bd = Infinity;
@@ -78,6 +79,7 @@ export function Live() {
       <div class="row" style=${{ marginTop: "10px" }}><input type="text" class="grow" placeholder="Message everyone on the server" value=${msg} onInput=${(e) => setMsg(e.target.value)}
         onKeyDown=${(e) => { if (e.key === "Enter" && msg.trim()) { act(() => rpc("command", { cmd: "msg", arg: msg }), "Sent"); setMsg(""); } }} />
         <button class="btn" onClick=${() => { if (msg.trim()) { act(() => rpc("command", { cmd: "msg", arg: msg }), "Sent"); setMsg(""); } }}>Send</button></div>`}
+    <${GoalsCard} goals=${(live && live.goals) || (st.info && st.info.goals)} />
   </div>`;
 }
 
@@ -90,5 +92,7 @@ function Recap({ recap }) {
     <div class="recap">${players.map((p, i) => html`<div key=${p.name} class="card">
       <div class="row"><b style=${{ fontSize: "16px" }}>${p.name}</b>${i === 0 && p.kills ? html`<span class="chip accent">Top killer</span>` : null}</div>
       <div class="big">${p.kills}</div><div class="muted small">kills · ${p.deaths} deaths · ${time(p.hours)}</div>
+      ${p.track ? html`<div class="dim small">${trackLine(p.track)}</div>` : null}
+      ${p.goals && p.goals.length ? html`<div class="recap-goals">${p.goals.map((g) => html`<span key=${g.id} class="chip accent">${g.name} +${g.xp}</span>`)}</div>` : null}
     </div>`)}</div></div>`;
 }

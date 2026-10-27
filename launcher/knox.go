@@ -19,11 +19,13 @@ import (
 )
 
 type GamePlayer struct {
-	ID     string  `json:"id,omitempty"` // Steam ID; "" if the name didn't match a lobby member
-	Name   string  `json:"name"`
-	Kills  int     `json:"kills"`
-	Deaths int     `json:"deaths"`
-	Hours  float64 `json:"hours"` // hours the character had survived when the game closed
+	ID     string             `json:"id,omitempty"` // Steam ID; "" if the name didn't match a lobby member
+	Name   string             `json:"name"`
+	Kills  int                `json:"kills"`
+	Deaths int                `json:"deaths"`
+	Hours  float64            `json:"hours"`           // hours the character had survived when the game closed
+	Goals  []GoalDone         `json:"goals,omitempty"` // Knox goals finished this game (goals.go)
+	Track  map[string]float64 `json:"track,omitempty"` // what Knox Link counted: walk, drive, bandOthers...
 }
 
 type GameRecord struct {
@@ -87,11 +89,13 @@ func (a *App) recordGame() {
 		Updated int64 `json:"updated"`
 		Day     int   `json:"day"`
 		Players []struct {
-			Name    string  `json:"name"`
-			SteamID string  `json:"steamID"`
-			Kills   int     `json:"kills"`
-			Deaths  int     `json:"deaths"`
-			Hours   float64 `json:"hours"`
+			Name    string             `json:"name"`
+			SteamID string             `json:"steamID"`
+			Kills   int                `json:"kills"`
+			Deaths  int                `json:"deaths"`
+			Hours   float64            `json:"hours"`
+			Goals   []GoalDone         `json:"goals"`
+			Track   map[string]float64 `json:"track"`
 		} `json:"players"`
 	}
 	if json.Unmarshal(b, &recap) != nil || len(recap.Players) == 0 || recap.Started < n.Started-120 {
@@ -114,7 +118,7 @@ func (a *App) recordGame() {
 		if id == "" || id == "0" {
 			id = byName[strings.ToLower(strings.TrimSpace(p.Name))]
 		}
-		g.Players = append(g.Players, GamePlayer{ID: id, Name: p.Name, Kills: p.Kills, Deaths: p.Deaths, Hours: p.Hours})
+		g.Players = append(g.Players, GamePlayer{ID: id, Name: p.Name, Kills: p.Kills, Deaths: p.Deaths, Hours: p.Hours, Goals: p.Goals, Track: p.Track})
 	}
 	a.mergeGames([]GameRecord{g})
 	a.publishHistory()
@@ -208,16 +212,19 @@ func (a *App) readHistory() {
 // Player stats ------------------------------------------------------------------------------------
 
 type PlayerStats struct {
-	Games     int      `json:"games"`
-	Hosted    int      `json:"hosted"`
-	Kills     int      `json:"kills"`
-	Deaths    int      `json:"deaths"`
-	Hours     float64  `json:"hours"`     // best character life per world, added up
-	BestKills int      `json:"bestKills"` // most kills in one game
-	Longest   float64  `json:"longest"`   // longest character life
-	Speedruns int      `json:"speedruns"` // died within an in-game hour
-	BestDay   int      `json:"bestDay"`
-	Stories   []string `json:"stories,omitempty"`
+	Games     int                `json:"games"`
+	Hosted    int                `json:"hosted"`
+	Kills     int                `json:"kills"`
+	Deaths    int                `json:"deaths"`
+	Hours     float64            `json:"hours"`     // best character life per world, added up
+	BestKills int                `json:"bestKills"` // most kills in one game
+	Longest   float64            `json:"longest"`   // longest character life
+	Speedruns int                `json:"speedruns"` // died within an in-game hour
+	BestDay   int                `json:"bestDay"`
+	Stories   []string           `json:"stories,omitempty"`
+	GoalXP    int                `json:"goalXP,omitempty"`
+	Goals     []string           `json:"goals,omitempty"` // ids of goals finished (story goals give badges)
+	Track     map[string]float64 `json:"track,omitempty"` // Knox Link counts added up (nicknames)
 }
 
 func statsFor(games []GameRecord, id string) PlayerStats {
@@ -242,6 +249,16 @@ func statsFor(games []GameRecord, id string) PlayerStats {
 				s.Speedruns++
 			}
 			s.BestDay = max(s.BestDay, g.Day)
+			for _, gd := range p.Goals {
+				s.GoalXP += gd.XP
+				s.Goals = append(s.Goals, gd.ID)
+			}
+			for k, v := range p.Track {
+				if s.Track == nil {
+					s.Track = map[string]float64{}
+				}
+				s.Track[k] += v
+			}
 			if g.Story != "" {
 				stories[g.Story] = true
 			}
@@ -277,8 +294,8 @@ var badges = []Badge{
 	{"recruiter", "Recruiter", "Bring 3 friends into Knox Launcher", false},
 	{"everystory", "Every Story", "Play every story once", false},
 	{"speedrun", "Speedrun", "Die in the first in-game hour (shame badge)", false},
-	{"fieldmedic", "Field Medic", "Bandage squad mates 25 times", true},
-	{"roadtrip", "Road Trip", "Drive 50 km total", true},
+	{"fieldmedic", "Field Medic", "Bandage squad mates 25 times", false},
+	{"roadtrip", "Road Trip", "Drive 50 km total", false},
 }
 
 var titles = []struct {
@@ -346,6 +363,8 @@ func (a *App) knoxProfile() KnoxProfile {
 	add("Friends you brought in", 100*recruited)
 	// K3: friends who added your mod pack
 	add("Friends who added your pack", 50*len(cfg.Knox.PackAdds))
+	// K2, K6, K9, K10: goals Knox Link counted in your games
+	add("Goals", s.GoalXP)
 	// badges
 	with := map[string]int{}
 	for _, g := range games {
@@ -382,8 +401,15 @@ func (a *App) knoxProfile() KnoxProfile {
 		"recruiter":    recruited >= 3,
 		"everystory":   allStories > 0 && len(s.Stories) >= allStories,
 		"speedrun":     s.Speedruns > 0,
+		"fieldmedic":   s.Track["bandOthers"] >= 25,
+		"roadtrip":     s.Track["drive"] >= 50000,
 	}
-	for _, b := range badges {
+	for _, id := range s.Goals {
+		if strings.HasPrefix(id, "story:") {
+			got["story-"+strings.TrimPrefix(id, "story:")] = true
+		}
+	}
+	for _, b := range allBadges() {
 		if got[b.ID] {
 			p.Badges = append(p.Badges, b.ID)
 		}

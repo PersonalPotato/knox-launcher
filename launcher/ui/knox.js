@@ -63,6 +63,15 @@ export function nicknames(members, squad, seed) {
     return vals.filter((x) => x === v).length === 1 ? v : null; // only a clear winner earns it
   };
   const lvl = (x) => (knoxOf(x.m) || {}).lvl || 1;
+  // Knox Link counts (walked, drove, bitten...): only a clear winner earns the name
+  const tr = (x, k) => (x.s.track && x.s.track[k]) || 0;
+  const topT = (k) => {
+    if (withStats.length < 2) return null;
+    const vals = withStats.map((x) => tr(x, k));
+    const v = Math.max(...vals);
+    return vals.filter((y) => y === v).length === 1 ? v : null;
+  };
+  for (const x of withStats) x.s = { ...x.s, goalCount: (x.s.goals || []).length };
   const rules = [
     ["Zombie Bait", (x) => x.s.deaths > 0 && x.s.deaths === top("deaths")],
     ["Speedrun", (x) => x.s.speedruns > 0],
@@ -72,6 +81,14 @@ export function nicknames(members, squad, seed) {
     ["The Pacifist", (x) => x.s.games > 0 && x.s.deaths === 0 && x.s.kills === top("kills", Math.min)],
     ["Couch Potato", (x) => x.s.games > 0 && x.s.hours === top("hours", Math.min) && x.s.hours < 2],
     ["The Spare", (x) => list.length > 1 && lvl(x) === Math.min(...list.map(lvl)) && list.filter((y) => lvl(y) === lvl(x)).length === 1],
+    ["Marathon Man", (x) => tr(x, "walk") >= 5000 && tr(x, "walk") === topT("walk")],
+    ["Taxi Driver", (x) => tr(x, "drive") >= 5000 && tr(x, "drive") === topT("drive")],
+    ["Chew Toy", (x) => tr(x, "bites") > 0 && tr(x, "bites") === topT("bites")],
+    ["Pincushion", (x) => tr(x, "damage") >= 100 && tr(x, "damage") === topT("damage")],
+    ["Nurse", (x) => tr(x, "bandOthers") >= 3 && tr(x, "bandOthers") === topT("bandOthers")],
+    ["Sleeping Beauty", (x) => tr(x, "sleepMins") >= 600 && tr(x, "sleepMins") === topT("sleepMins")],
+    ["MacGyver", (x) => tr(x, "crafted") >= 10 && tr(x, "crafted") === topT("crafted")],
+    ["Overachiever", (x) => (x.s.goals || []).length >= 3 && (x.s.goals || []).length === top("goalCount")],
     ["New Guy", (x) => !x.s.games && withStats.length > 0],
   ];
   const out = {};
@@ -170,7 +187,8 @@ export function NavLevel() {
   </button>`;
 }
 
-const ICON = { firstnight: "☾", weekone: "7", sixmonths: "6", hordebreaker: "✕", neveralone: "♥", packrat: "▣", hostmost: "★", recruiter: "+", everystory: "✎", speedrun: "☠", fieldmedic: "✚", roadtrip: "➜" };
+const ICON = { firstnight: "☾", weekone: "7", sixmonths: "6", hordebreaker: "✕", neveralone: "♥", packrat: "▣", hostmost: "★", recruiter: "+", everystory: "✎", speedrun: "☠", fieldmedic: "✚", roadtrip: "➜",
+  "story-prisonbreak": "⛓", "story-ehe-evac": "✈", "story-farmhands": "✿", "story-firecrew": "♨" };
 
 export function BadgeShelf({ have, defs, compact }) {
   const all = (defs || (S.knoxDefs && S.knoxDefs.badges) || []);

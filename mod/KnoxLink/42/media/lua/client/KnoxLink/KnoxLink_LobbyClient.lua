@@ -413,6 +413,13 @@ local function onServerCommand(module, command, args)
         if Lobby.isHost and args and args.name then setProtected(args.name, true) end
     elseif command == "toast" then
         if args and args.text then toast(args.text) end
+    elseif command == "goal" then
+        -- a Knox goal was finished (squad goals for everyone, personal ones for that player)
+        local me = getPlayer() and getPlayer():getUsername() or ""
+        if args and args.name and (args.who == "" or args.who == me) then
+            toast("Goal: " .. args.name .. "  +" .. tostring(args.xp or 0) .. " Knox XP")
+            getSoundManager():playUISound("UIActivateMainMenuItem")
+        end
     elseif command == "respawn" then
         -- the host's respawn rule moved this new character (back to base, or next to the squad)
         local p = getPlayer()

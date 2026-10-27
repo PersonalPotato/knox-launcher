@@ -639,7 +639,7 @@ func (s *Server) call(method string, args json.RawMessage) (any, error) {
 		}
 		return nil, nil
 	case "knox":
-		return map[string]any{"me": a.knoxProfile(), "badges": badges, "titles": titles, "looks": lookDefs()}, nil
+		return map[string]any{"me": a.knoxProfile(), "badges": allBadges(), "titles": titles, "looks": lookDefs()}, nil
 	case "setLook":
 		return nil, a.setLook(p.Look)
 	case "directorsCut":
@@ -861,6 +861,7 @@ func (a *App) liveStatus() map[string]any {
 	out["status"] = readJSONFile(a.paths.bridge("app_status.json"))
 	out["recap"] = readJSONFile(a.paths.bridge("app_recap.json"))
 	if a.gameState().Host {
+		out["goals"] = a.goalsFor(a.cfg.Get().Host.World)
 		out["cast"] = a.saveCast()
 	} else {
 		out["cast"] = readCast(a.paths.bridge("app_cast.json"))

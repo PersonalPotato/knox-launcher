@@ -285,3 +285,16 @@ html:root[data-accent="blue"] { --accent: #2a6ae3; --accent2: #4a8aff; }
 .kw-cut { margin-top: 10px; }
 @media (max-width: 1000px) { .cz-body { grid-template-columns: 1fr; } .cz-preview { position: static; } }
 .cz input[type=range] { accent-color: var(--accent); }
+
+/* Knox goals */
+.goals-card .goal { padding: 10px 0; border-top: 1px solid var(--line); }
+.goals-card .goal:first-of-type { border-top: 0; }
+.goal-top { display: flex; align-items: baseline; gap: 10px; }
+.goal-kind { font: 600 11px Oswald, sans-serif; text-transform: uppercase; letter-spacing: .08em; color: var(--accent2); min-width: 78px; }
+.goal-xp { font: 700 14px Oswald, sans-serif; color: var(--muted); }
+.goal.done .goal-xp { color: var(--good); }
+.goal.done b { text-decoration: line-through; text-decoration-color: var(--accent); }
+.goal-text { color: var(--muted); font-size: 13px; margin: 2px 0 6px 88px; }
+.goal .bar { margin-left: 88px; height: 6px; }
+.goal .bar + .dim { margin-left: 88px; }
+.recap-goals { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
