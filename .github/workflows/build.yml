@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a release (tag = v + appVersion)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -23,12 +28,22 @@ jobs:
           go-version-file: launcher/go.mod
           cache-dependency-path: launcher/go.sum
 
-      # The launcher's self-update compares the release tag with appVersion, so they must match.
-      - name: Check tag matches appVersion
-        if: startsWith(github.ref, 'refs/tags/v')
+      # The release tag. The launcher's self-update compares it with appVersion, so they must match.
+      # Releases come from a v* tag push, or from "Run workflow" with "Publish a release" ticked.
+      - name: Release tag
+        id: tag
         run: |
           v=$(sed -n 's/^const appVersion = "\(.*\)"/\1/p' launcher/app.go)
-          if [ "v$v" != "${GITHUB_REF_NAME}" ]; then echo "tag ${GITHUB_REF_NAME} but appVersion is $v"; exit 1; fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if [ "v$v" != "${GITHUB_REF_NAME}" ]; then echo "tag ${GITHUB_REF_NAME} but appVersion is $v"; exit 1; fi
+            echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.release }}" = "true" ]; then
+            if [ "${GITHUB_REF_NAME}" != "main" ]; then echo "releases only come from main"; exit 1; fi
+            if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null; then
+              echo "v$v is already released. Bump appVersion in launcher/app.go first."; exit 1
+            fi
+            echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Test
         working-directory: launcher
@@ -62,16 +77,19 @@ jobs:
       # Only runs if a VT_API_KEY secret is set in the repo settings.
       - name: VirusTotal scan
         id: vt
-        if: startsWith(github.ref, 'refs/tags/v') && env.VT_API_KEY != ''
+        if: steps.tag.outputs.tag != '' && env.VT_API_KEY != ''
         uses: crazy-max/ghaction-virustotal@v4
         with:
           vt_api_key: ${{ secrets.VT_API_KEY }}
           files: dist/KnoxLauncher.exe
 
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.tag.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Knox Launcher ${{ steps.tag.outputs.tag }}
           files: |
             dist/KnoxLauncher.exe
             dist/SHA256SUMS.txt
