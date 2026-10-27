@@ -797,6 +797,7 @@ func (s *Server) state(since int) map[string]any {
 				out["info"] = info
 			} else if json.Unmarshal([]byte(lobbyBig(a.steam, id, "info")), &info) == nil {
 				out["info"] = info
+				a.keepGuestCopy(id, info)
 			}
 			out["hostName"] = a.steam.LobbyData(id, "host")
 			out["lobbyState"] = a.steam.LobbyData(id, "state")

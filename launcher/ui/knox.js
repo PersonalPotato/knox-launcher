@@ -1,6 +1,6 @@
 // Knox level, badges, funny nicknames and squad names. Looks only.
-import { html, useEffect, useState, S, update, rpc, act, toast } from "./core.js";
-import { LooksPanel } from "./looks.js";
+import { html, useEffect, useState, S, update, rpc, act, toast, inLobby } from "./core.js";
+import { looksDefs, unlockLevel } from "./looks.js";
 
 // seeded random, so a poster stays the same while it's on screen
 export function seeded(seed) {
@@ -182,6 +182,24 @@ export function BadgeShelf({ have, defs, compact }) {
   </div>`)}</div>`;
 }
 
+// NextUnlock: what your next level gets you, and the way to the Customize page
+function NextUnlock({ k }) {
+  const d = looksDefs();
+  const all = d ? ["genres", "backdrops", "spines", "posters", "frames", "cases", "stickers", "wears", "shelves", "props", "poses"].flatMap((f) => d[f] || []) : [];
+  const lvl = unlockLevel(k);
+  const nextLvl = Math.min(...all.filter((u) => u.lvl > lvl).map((u) => u.lvl));
+  const next = all.filter((u) => u.lvl === nextLvl);
+  return html`<div class="kw-next">
+    <div class="grow">${isFinite(nextLvl) ? html`<h4>Next unlock · level ${nextLvl}</h4><div>${next.map((u) => html`<span key=${u.id} class="chip accent">${u.name}</span>`)}</div>` : html`<h4>Everything unlocked</h4>`}</div>
+    <button class="btn primary" onClick=${() => { const shelf = !S.tape && !inLobby(); update({ modal: null, ...(shelf ? { customizing: true } : { tab: "customize" }) }); }}>Customize</button>
+  </div>
+  ${d ? html`<div class="kw-cut">${k.lvl >= d.cut ? html`<button class="btn sm" onClick=${async () => {
+      if (!confirm("Director's Cut: your level goes back to 1. You keep everything you unlocked and your tapes get a Director's Cut label. Go?")) return;
+      const r = await act(() => rpc("directorsCut"));
+      if (r !== undefined) { toast("Director's Cut. Back to level 1."); loadKnox(); }
+    }}>Take the Director's Cut</button>` : html`<span class="muted small">At level ${d.cut}: go back to level 1, keep every unlock, and get a Director's Cut label.${k.cut ? ` You have ${k.cut}.` : ""}</span>`}</div>` : null}`;
+}
+
 // KnoxWindow: your level, where your XP came from, titles and badges.
 export function KnoxWindow() {
   useEffect(() => { loadKnox(); }, []);
@@ -195,11 +213,10 @@ export function KnoxWindow() {
       <div><h4>Where your XP came from</h4>
         ${(k.sources || []).length ? html`<div class="kw-src">${k.sources.map((s) => html`<div key=${s.what}><span>${s.what}</span><b>+${s.xp}</b></div>`)}</div>` : html`<div class="muted small">Play, host, invite friends and share packs to earn XP.</div>`}
         <h4>Titles</h4><div class="kw-titles">${d.titles.map((t) => html`<span key=${t.Level} class=${"chip" + (k.lvl >= t.Level ? " accent" : "")}>Lv ${t.Level} ${t.Name}</span>`)}</div>
-        <div class="muted small" style=${{ marginTop: "8px" }}>Levels unlock tape looks (below). They never change the game.</div>
+        <div class="muted small" style=${{ marginTop: "8px" }}>Levels unlock tape looks. They never change the game.</div>
       </div>
       <div><h4>Badges · ${(k.badges || []).length} of ${d.badges.length}</h4><${BadgeShelf} have=${k.badges} /></div>
     </div>
-    <h3 class="looks-head">Your tape</h3>
-    <${LooksPanel} />
+    <${NextUnlock} k=${k} />
   </div>`;
 }

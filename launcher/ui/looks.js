@@ -13,9 +13,9 @@ export function lookOf(m) {
     const mine = (S.cfg && S.cfg.look) || {};
     const t = S.tape;
     if (!t || !t.look || t.kind !== "world") return mine;
-    // the hosted tape's own cover (the same as tapes.go lobbyLook sends to the lobby)
-    const { genre, backdrop, worn, foil, spine, spineInk } = t.look;
-    return { ...mine, genre, backdrop, worn, foil, spine, spineInk, wornMix: false, foilMix: false };
+    // the hosted tape's own cover (the same as tapes.go lobbyLook sends to the lobby); the poster parts stay yours
+    const { pose, frame, poster, posterInk, headline, hideNick, plate, collector, ...box } = t.look;
+    return { ...mine, ...box, wornMix: false, foilMix: false };
   }
   const k = m.knox || {};
   return k.look || {};
@@ -53,8 +53,17 @@ export function spineOpts(look, k = S.knox) {
   const d = looksDefs();
   const lvl = unlockLevel(k);
   const styles = d && d.spines ? d.spines.filter((u) => u.lvl <= lvl).map((u) => u.id) : ["classic", "block"];
-  return { style: look.spine || "", ink: look.spineInk || "", styles, backdrop: look.backdrop };
+  return { style: look.spine || "", ink: look.spineInk || "", styles, backdrop: look.backdrop, text: look.spineText || "", labelInk: look.labelInk || "",
+    studio: look.studio || "", wear: look.wear || "" };
 }
+
+// boxOpts: the free picks and stickers a cover and back print from a look
+export function boxOpts(look) {
+  return { tagline: look.tagline || "", titleFont: look.titleFont || "", titleInk: look.titleInk || "", tint: look.tint || "", rating: look.rating || "",
+    studio: look.studio || "", price: look.price || "", rewind: !!look.rewind, stickers: look.stickers || [], wear: look.wear || "" };
+}
+// caseOpts: the plastic around the sleeve (vhs3d dressCase)
+export const caseOpts = (look) => ({ case: look.case || "", caseInk: look.caseInk || "" });
 
 export function unlockLevel(k) {
   const d = looksDefs();
@@ -73,6 +82,16 @@ export function poseOf(m, seed) {
   const d = looksDefs();
   const pose = lookOf(m).pose;
   return posePick(d && d.poses, pose === "mix" ? "" : pose, seeded(seed + (m ? m.id : "")), unlockLevel(knoxOf(m)));
+}
+
+// wornOf: what a member looks like in this world right now. A living survivor in the world's cast wears
+// what Knox Link last saw them in; anyone else looks like their creator character.
+export function wornOf(m) {
+  const c = charOf(m);
+  const cast = S.state && S.state.info && S.state.info.cast;
+  const name = String(m.name || "").toLowerCase();
+  const hit = cast && (cast.cast || []).find((x) => x.alive && x.look && x.look.clothing && String(x.user || "").toLowerCase() === name);
+  return hit ? { ...(c || {}), ...hit.look } : c;
 }
 
 export function charOf(m) {
@@ -100,17 +119,17 @@ export function squadTape(members) {
   const played = ((S.cfg && S.cfg.games) || []).filter((g) => g.world === info.world).length; // sessions of this world, not the squad's
   const sq = sequel(name, worldPart(info.world, played), seed);
   const nick = nicknames(members, squad, String(st.lobby || "") + members.map((m) => m.id).join(","));
-  const people = members.map((m) => ({ id: m.id, c: charOf(m), pose: poseOf(m, seed) }));
+  const people = members.map((m) => ({ id: m.id, c: wornOf(m), pose: poseOf(m, seed) }));
   const cast = members.map((m) => {
     const c = charOf(m);
-    return { name: c && c.forename ? `${c.forename} ${c.surname}` : m.name, nick: nick[m.id], player: m.name };
+    return { name: c && c.forename ? `${c.forename} ${c.surname}` : m.name, nick: lookOf(m).hideNick ? "" : nick[m.id], player: m.name };
   });
   const stats = [["Games", squad.games || 0], ["Kills", squad.kills || 0], ["Best day", squad.bestDay || 0], ["Deaths", squad.deaths || 0], ["Hours", fmtHours(squad.hours)]];
   const best = Math.max(1, ...members.map((m) => ((knoxOf(m) || {}).lvl) || 1));
   const key = JSON.stringify([sq, look, cast, stats, people.map((p) => [p.c && JSON.stringify(p.c).length, p.pose.anim]), cutOf(host)]);
   const make = async () => {
     const fig = await castShot(people, seed);
-    const o = { ...sq, genre: look.genre, backdrop: look.backdrop, fig, cast, stats, foil: look.foil, worn: look.worn,
+    const o = { ...sq, ...boxOpts(look), genre: look.genre, backdrop: look.backdrop, fig, cast, stats, foil: look.foil, worn: look.worn,
       frame: look.frame === "none" ? "" : look.frame || frameFor(best), cut: cutOf(host), collector: look.collector, seed };
     const front = await drawCover(o);
     const story = info.backstory && S.presets && (S.presets.backstories || []).find((b) => b.id === info.backstory);
@@ -118,7 +137,7 @@ export function squadTape(members) {
       blurb: blurb({ games: squad.games, kills: squad.kills, deaths: squad.deaths, bestDay: squad.bestDay, cast, town: info.spawn && info.spawn.name, story: story && story.name }),
       rental: String(seed).slice(-4) });
     const spine = await drawSpine({ ...spineOpts(look, knoxOf(host)), seed, title: sq.title, sub: sq.part, genre: look.genre, frame: o.frame, worn: look.worn, num: String(seed).slice(-4) });
-    return { front: front.canvas, mask: front.mask, back, spine };
+    return { front: front.canvas, mask: front.mask, back, spine, ...caseOpts(look) };
   };
   return { key, make, title: sq };
 }
@@ -135,13 +154,13 @@ export function myTape(pickedLook) {
   const key = JSON.stringify([look, name, k.lvl, k.cut, c && JSON.stringify(c).length]);
   const make = async () => {
     const fig = await castShot(people, seed + (look.pose || ""));
-    const o = { title: name.toUpperCase(), part: "", sub: "", genre: look.genre, backdrop: look.backdrop, fig, cast: [{ name, nick: k.title, player: me.name }],
+    const o = { title: name.toUpperCase(), part: "", sub: "", ...boxOpts(look), genre: look.genre, backdrop: look.backdrop, fig, cast: [{ name, nick: k.title, player: me.name }],
       stats: [["Level", k.lvl || 1], ["XP", k.xp || 0], ["Badges", (k.badges || []).length]], foil: look.foil, worn: look.worn,
       frame: look.frame === "none" ? "" : look.frame || frameFor(k.lvl || 1), cut: k.cut, collector: look.collector, seed: name };
     const front = await drawCover(o);
     const back = await drawBack({ ...o, photos: [fig, await image("/art")], player: me.name, blurb: `${name}. ${k.title || "Fresh Meat"}. Level ${k.lvl || 1}.`, rental: "0001" });
     const spine = await drawSpine({ ...spineOpts(look), title: name.toUpperCase(), genre: look.genre, frame: o.frame, worn: look.worn, num: "0001" });
-    return { front: front.canvas, mask: front.mask, back, spine };
+    return { front: front.canvas, mask: front.mask, back, spine, ...caseOpts(look) };
   };
   return { key, make };
 }
@@ -194,9 +213,12 @@ export async function shelfFaces(t, i) {
   const c = S.cfg.character;
   const k = S.knox || {};
   const thumb = t.thumb ? await image(`/savethumb?t=${TOKEN}&mode=${encodeURIComponent(t.mode)}&name=${encodeURIComponent(t.name)}`) : null;
-  const fig = t.kind === "solo" || !t.cast || t.cast.length < 2 ? await castShot([{ c, pose: posePick(looksDefs() && looksDefs().poses, look.pose, seeded(t.name)) }], "shelf" + t.name) : null;
+  const poses = looksDefs() && looksDefs().poses;
+  // a world's cast in what they last wore in game (Knox Link); otherwise your own survivor
+  const fig = t.castLooks && t.castLooks.length ? await castShot(t.castLooks.map((l, j) => ({ id: String(j), c: l, pose: posePick(poses, "", seeded(t.name + j)) })), "shelf" + t.name)
+    : t.kind === "solo" || !t.cast || t.cast.length < 2 ? await castShot([{ c, pose: posePick(looksDefs() && looksDefs().poses, look.pose, seeded(t.name)) }], "shelf" + t.name) : null;
   const sub = tapeSub(t);
-  const o = { title: tapeTitle(t), part: sub.startsWith("PART") ? sub : "", sub: sub.startsWith("PART") ? sequel(t.name, t.part || worldPart(t.name, t.games), t.name).sub : "", genre: look.genre, backdrop: look.backdrop, fig, photo: thumb,
+  const o = { ...boxOpts(look), title: tapeTitle(t), part: sub.startsWith("PART") ? sub : "", sub: sub.startsWith("PART") ? sequel(t.name, t.part || worldPart(t.name, t.games), t.name).sub : "", genre: look.genre, backdrop: look.backdrop, fig, photo: thumb,
     cast: (t.cast && t.cast.length ? t.cast : [(S.state && S.state.me && S.state.me.name) || "You"]).slice(0, 4).map((n) => ({ name: n })),
     stats: [["Nights", t.games], ["Kills", t.kills], ["Best day", t.bestDay], ["Deaths", t.deaths]], foil: look.foil, worn: look.worn,
     frame: look.frame === "none" ? "" : look.frame || frameFor(k.lvl || 1), cut: k.cut, collector: look.collector, seed: t.mode + t.name,
@@ -205,19 +227,19 @@ export async function shelfFaces(t, i) {
   const back = await drawBack({ ...o, photos: [thumb, fig || (await image("/art"))], player: (S.state && S.state.me && S.state.me.name) || "",
     blurb: blurb({ games: t.games, kills: t.kills, deaths: t.deaths, bestDay: t.bestDay, cast: t.cast, town: t.town, story: t.story }), rental: String(1000 + i).slice(-4) });
   const spine = await shelfSpine(t, i);
-  return { front: front.canvas, mask: front.mask, back, spine };
+  return { front: front.canvas, mask: front.mask, back, spine, ...caseOpts(look) };
 }
 
 // freshFaces: a tape made on the shelf that nobody has played yet. The cast is still to come.
 async function freshFaces(t, i) {
   const look = tapeLook(t);
   const fig = tbaFig();
-  const o = { title: tapeTitle(t), genre: look.genre, backdrop: look.backdrop, fig, seed: t.kind + t.name, foil: look.foil, worn: look.worn,
+  const o = { ...boxOpts(look), title: tapeTitle(t), genre: look.genre, backdrop: look.backdrop, fig, seed: t.kind + t.name, foil: look.foil, worn: look.worn,
     cast: [{ name: "To be announced" }], stats: [["Nights", 0]], kicker: t.kind === "world" ? "A KNOX LAUNCHER WORLD" : "A KNOX LAUNCHER SOLO GAME" };
   const front = await drawCover(o);
   const back = await drawBack({ ...o, photos: [fig, await image("/art")], blurb: "A new world. Nobody has played it yet.", rental: String(1000 + i).slice(-4) });
   const spine = await shelfSpine(t, i);
-  return { front: front.canvas, mask: front.mask, back, spine };
+  return { front: front.canvas, mask: front.mask, back, spine, ...caseOpts(look) };
 }
 
 // LooksPanel: pick your tape looks in the Knox level window.

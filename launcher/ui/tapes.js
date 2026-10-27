@@ -5,6 +5,7 @@ import { CaseView } from "./vhs3d.js";
 import { shelfFaces, tapeTitle, looksDefs, unlockLevel } from "./looks.js";
 import { SetupTiles, StartButton } from "./play.js";
 import { sound } from "./sound.js";
+import { TapeRows } from "./customize.js";
 
 export async function loadTape(t) {
   sound("insert");
@@ -92,12 +93,13 @@ export function TapeMaker({ edit }) {
   const lvl = unlockLevel(S.knox);
   const [title, setTitle] = useState(edit ? tapeTitle(edit) : TITLES[Math.floor(Math.random() * TITLES.length)]);
   const [kind, setKind] = useState(edit ? edit.kind : "squad");
-  const [look, setLook] = useState(edit ? { ...(edit.look || S.cfg.look || {}) } : { genre: "mix", backdrop: "mix", spine: "mix", spineInk: "" });
+  const [look, setLook] = useState(edit ? { ...(edit.look || S.cfg.look || {}) } : { genre: "mix", backdrop: "mix", spine: "", spineInk: "", ...(S.cfg.look || {}) });
   const [saving, setSaving] = useState(false);
   const set = (p) => setLook({ ...look, ...p });
   const tk = kind === "solo" ? "solo" : "world";
   const preview = { ...(edit || {}), kind: tk, mode: edit ? edit.mode : "Sandbox", name: edit ? edit.name : tk === "world" ? title.replace(/[^A-Za-z0-9_-]/g, "") : title.trim(), title, look, fresh: edit ? edit.fresh : true, games: edit ? edit.games : 0 };
-  const cover = { genre: look.genre || "", backdrop: look.backdrop || "", spine: look.spine || "", spineInk: look.spineInk || "", worn: !!look.worn, foil: !!look.foil };
+  // everything on the box; the poster parts are yours, not the tape's
+  const { pose, frame, poster, posterInk, headline, hideNick, plate, wornMix, foilMix, ...cover } = look;
   const close = () => update({ making: null });
   const save = async () => {
     if (!title.trim()) return;
@@ -118,10 +120,6 @@ export function TapeMaker({ edit }) {
       setSaving(false);
     }
   };
-  const row = (name, list, field, extra) => html`<h4>${name}</h4><div class="look-row">
-    ${extra || null}
-    <button class=${"btn sm" + (look[field] === "mix" ? " primary" : "")} onClick=${() => set({ [field]: "mix" })}>Surprise me</button>
-    ${(list || []).map((u) => html`<button key=${u.id} class=${"btn sm" + (look[field] === u.id ? " primary" : "")} disabled=${lvl < u.lvl} onClick=${() => set({ [field]: u.id })}>${u.name}${lvl < u.lvl ? " · Lv " + u.lvl : ""}</button>`)}</div>`;
   return html`<div class="maker">
     <div class="maker-case"><${CaseView} key=${JSON.stringify([title, look, kind])} make=${() => shelfFaces(preview, 0)} height=${600} /></div>
     <div class="maker-side">
@@ -133,13 +131,7 @@ export function TapeMaker({ edit }) {
           <span class="dim small">${kind === "squad" ? "You host, friends join." : "Just you."}</span></div>`}
         <h4>Title</h4>
         <div class="row"><input class="maker-title" maxlength="40" value=${title} onInput=${(e) => setTitle(e.target.value)} /><button class="btn" onClick=${() => setTitle(TITLES[Math.floor(Math.random() * TITLES.length)])}>Random</button></div>
-        ${row("Cover", d.genres, "genre")}
-        ${row("Backdrop", d.backdrops, "backdrop")}
-        ${row("Spine", d.spines, "spine")}
-        ${row("Spine colour", d.spineInks, "spineInk", html`<button class=${"btn sm" + (!look.spineInk ? " primary" : "")} onClick=${() => set({ spineInk: "" })}>Match cover</button>`)}
-        <h4>Case</h4><div class="look-row">
-          <button class=${"btn sm" + (look.worn ? " primary" : "")} disabled=${lvl < (d.worn || 1)} onClick=${() => set({ worn: !look.worn })}>Worn${lvl < (d.worn || 1) ? " · Lv " + d.worn : ""}</button>
-          <button class=${"btn sm" + (look.foil ? " primary" : "")} disabled=${lvl < (d.foil || 1)} onClick=${() => set({ foil: !look.foil })}>Foil title${lvl < (d.foil || 1) ? " · Lv " + d.foil : ""}</button></div>
+        <${TapeRows} look=${look} set=${set} lvl=${lvl} />
         <div class="dim small" style=${{ marginTop: "12px" }}>${edit ? "Poses are picked at random." : "Poses are picked at random. The cast goes on once there are survivors. World, mods and story are set up next."}</div>
         <div class="row" style=${{ marginTop: "16px" }}>
           <button class="btn" onClick=${close}>Cancel</button>

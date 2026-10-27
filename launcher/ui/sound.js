@@ -3,7 +3,22 @@ let ctx = null;
 let muted = false;
 try { muted = localStorage.getItem("knox-mute") === "1"; } catch {}
 
+let vol = 0.8;
+try { const v = parseFloat(localStorage.getItem("knox-vol")); if (v >= 0 && v <= 1) vol = v; } catch {}
+let master = null;
+
 export function soundOn() { return !muted; }
+export function soundVol() { return vol; }
+export function setVol(v) {
+  vol = Math.max(0, Math.min(1, v));
+  if (master) master.gain.value = vol;
+  try { localStorage.setItem("knox-vol", String(vol)); } catch {}
+}
+// out: every sound goes through one volume knob
+function out(c) {
+  if (!master) { master = c.createGain(); master.gain.value = vol; master.connect(c.destination); }
+  return master;
+}
 export function setSound(on) {
   muted = !on;
   try { localStorage.setItem("knox-mute", muted ? "1" : "0"); } catch {}
@@ -32,12 +47,12 @@ function thunk(c, at, freq, gain, len = 0.08) {
   const f = c.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = freq; f.Q.value = 2.5;
   const g = c.createGain();
   g.gain.setValueAtTime(gain, at); g.gain.exponentialRampToValueAtTime(0.001, at + len);
-  n.connect(f).connect(g).connect(c.destination);
+  n.connect(f).connect(g).connect(out(c));
   n.start(at); n.stop(at + len);
   const o = c.createOscillator(); o.type = "sine";
   o.frequency.setValueAtTime(freq / 6, at); o.frequency.exponentialRampToValueAtTime(40, at + len);
   const og = c.createGain(); og.gain.setValueAtTime(gain * 0.8, at); og.gain.exponentialRampToValueAtTime(0.001, at + len);
-  o.connect(og).connect(c.destination); o.start(at); o.stop(at + len);
+  o.connect(og).connect(out(c)); o.start(at); o.stop(at + len);
 }
 
 // whirr: motor noise sweeping in pitch
@@ -48,13 +63,13 @@ function whirr(c, at, secs, from, to, gain) {
   const g = c.createGain();
   g.gain.setValueAtTime(0.0001, at); g.gain.linearRampToValueAtTime(gain, at + 0.15);
   g.gain.setValueAtTime(gain, at + secs - 0.2); g.gain.linearRampToValueAtTime(0.0001, at + secs);
-  n.connect(f).connect(g).connect(c.destination);
+  n.connect(f).connect(g).connect(out(c));
   n.start(at); n.stop(at + secs);
   const o = c.createOscillator(); o.type = "sawtooth";
   o.frequency.setValueAtTime(from / 8, at); o.frequency.linearRampToValueAtTime(to / 8, at + secs);
   const lp = c.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 600;
   const og = c.createGain(); og.gain.setValueAtTime(0.0001, at); og.gain.linearRampToValueAtTime(gain * 0.25, at + 0.15); og.gain.linearRampToValueAtTime(0.0001, at + secs);
-  o.connect(lp).connect(og).connect(c.destination); o.start(at); o.stop(at + secs);
+  o.connect(lp).connect(og).connect(out(c)); o.start(at); o.stop(at + secs);
 }
 
 const SOUNDS = {

@@ -241,8 +241,15 @@ export async function build(c) {
   const looks = cat.looks;
   const female = !!c.female;
   const skins = looks.skinColors || [];
-  let skinIdx = skins.findIndex((s) => Math.abs(s.r - (c.skin || {}).r) < 0.02 && Math.abs(s.g - (c.skin || {}).g) < 0.02);
+  // an in-game look (Knox Link's cast) knows the skin texture; the creator only has a colour
+  let skinIdx = Number.isInteger(c.skinIndex) && c.skinIndex >= 0 && c.skinIndex < 5 ? c.skinIndex
+    : skins.findIndex((s) => Math.abs(s.r - (c.skin || {}).r) < 0.02 && Math.abs(s.g - (c.skin || {}).g) < 0.02);
   if (skinIdx < 0) skinIdx = 1;
+  // the game's texture choice per worn item, when known; otherwise one picked from the item id
+  const texOf = (list, it) => {
+    const i = (c.clothingTex || {})[it.loc];
+    return Number.isInteger(i) && list && list[i] ? list[i] : hashPick(list, it.id);
+  };
   const bodyTex = `Body/${female ? "Female" : "Male"}Body0${skinIdx + 1}${!female && c.chestHair ? "a" : ""}`;
 
   const items = Object.entries(c.clothing || {}).filter(([, id]) => id).map(([loc, id]) => ({ loc, id, look: cat.clothing[id] }))
@@ -251,7 +258,7 @@ export async function build(c) {
   const q = new URLSearchParams({ t: TOKEN, base: bodyTex });
   for (const it of items) {
     if (!it.look || !it.look.baseTextures) continue;
-    const tex = hashPick(it.look.baseTextures, it.id);
+    const tex = texOf(it.look.baseTextures, it);
     const tint = it.look.tint || it.look.hue ? (c.clothingTint || {})[it.loc] || DEFAULT_TINT : null;
     q.append("l", tex + (tint ? `|${tint.r.toFixed(3)},${tint.g.toFixed(3)},${tint.b.toFixed(3)}` : ""));
   }
@@ -300,7 +307,7 @@ export async function build(c) {
     if (!model) continue;
     const isStatic = /(^|[\\/])static[\\/]/i.test(model);
     if (isStatic && !(look.bone && rig)) continue;
-    const tex = hashPick(look.textures, it.id);
+    const tex = texOf(look.textures, it);
     const tint = look.tint || look.hue ? (c.clothingTint || {})[it.loc] || DEFAULT_TINT : null;
     jobs.push(addModel(model, tex, tint, true, isStatic ? 12 : layer++, isStatic ? look.bone : null));
   }
@@ -332,7 +339,7 @@ export function sizeHolder(holder, c) {
 export function CharacterView({ c, height = 360, small, portrait, controls }) {
   const box = useRef(null);
   const st = useRef(null);
-  const key = c ? JSON.stringify([c.female, c.skin, c.hair, c.hairColor, c.beard, c.chestHair, c.clothing, c.clothingTint]) : "";
+  const key = c ? JSON.stringify([c.female, c.skin, c.hair, c.hairColor, c.beard, c.chestHair, c.clothing, c.clothingTint, c.skinIndex, c.clothingTex]) : "";
   const ex = (c && c.extras) || {};
 
   useEffect(() => {

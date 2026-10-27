@@ -6,7 +6,12 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -32,6 +37,17 @@ func tapeKey(kind, mode, name string) string {
 func (a *App) tapeCall(method string, args json.RawMessage) (any, bool, error) {
 	switch method {
 	case "saveTape", "dropTape":
+	case "setPrefs":
+		var in struct {
+			Prefs Prefs `json:"prefs"`
+		}
+		if err := json.Unmarshal(args, &in); err != nil {
+			return nil, true, err
+		}
+		if err := checkPrefs(in.Prefs, a.knoxProfile()); err != nil {
+			return nil, true, err
+		}
+		return nil, true, a.cfg.Update(func(c *Config) { c.Prefs = in.Prefs })
 	default:
 		return nil, false, nil
 	}
@@ -78,8 +94,11 @@ func (a *App) lobbyLook() Look {
 	cfg := a.cfg.Get()
 	l := cfg.Look
 	if t, ok := cfg.Tapes[tapeKey("world", "", cfg.Host.World)]; ok {
-		l.Genre, l.Backdrop, l.Worn, l.Foil, l.WornMix, l.FoilMix = t.Look.Genre, t.Look.Backdrop, t.Look.Worn, t.Look.Foil, false, false
-		l.Spine, l.SpineInk = t.Look.Spine, t.Look.SpineInk
+		// everything on the box comes from the tape; the poster parts stay yours
+		box := t.Look
+		box.Pose, box.Frame, box.Poster, box.PosterInk, box.Headline, box.HideNick, box.Plate, box.Collector = l.Pose, l.Frame, l.Poster, l.PosterInk, l.Headline, l.HideNick, l.Plate, l.Collector
+		box.WornMix, box.FoilMix = false, false
+		l = box
 	}
 	return l
 }
@@ -97,4 +116,85 @@ func (a *App) moveSoloTape(want, got string) {
 			c.Tapes[tapeKey("solo", "Sandbox", got)] = t
 		}
 	})
+}
+
+// Guest copies: while you're in a friend's lobby, the launcher keeps their tape's title, cover look and
+// cast (with what everyone wears), so the tape on your shelf looks like theirs when they're offline.
+
+type GuestCopy struct {
+	Host     string     `json:"host"` // Steam ID
+	HostName string     `json:"hostName"`
+	World    string     `json:"world"`
+	Title    string     `json:"title,omitempty"`
+	Look     *Look      `json:"look,omitempty"`
+	Cast     *WorldCast `json:"cast,omitempty"`
+	Seen     int64      `json:"seen"`
+}
+
+var guestSaved sync.Map // file -> last JSON written (without Seen)
+
+func (a *App) guestFile(host, world string) string {
+	return filepath.Join(a.paths.Data, "guests", clean(host)+"_"+clean(world)+".json")
+}
+
+func (a *App) keepGuestCopy(lobby uint64, info HostInfo) {
+	if info.World == "" || a.steam == nil {
+		return
+	}
+	owner := a.steam.LobbyOwner(lobby)
+	if owner == 0 || owner == a.steam.MyID() {
+		return
+	}
+	g := GuestCopy{Host: strconv.FormatUint(owner, 10), HostName: a.steam.LobbyData(lobby, "host"), World: info.World, Title: info.SquadName, Cast: info.Cast}
+	var k struct {
+		Look *Look `json:"look"`
+	}
+	if json.Unmarshal([]byte(a.steam.MemberData(lobby, owner, "knox")), &k) == nil {
+		g.Look = k.Look
+	}
+	b, _ := json.Marshal(g)
+	file := a.guestFile(g.Host, g.World)
+	if old, ok := guestSaved.Load(file); ok && old.(string) == string(b) {
+		return
+	}
+	guestSaved.Store(file, string(b))
+	g.Seen = time.Now().Unix()
+	b, _ = json.Marshal(g)
+	_ = os.MkdirAll(filepath.Dir(file), 0755)
+	_ = os.WriteFile(file, b, 0644)
+}
+
+func (a *App) guestCopies() []GuestCopy {
+	var out []GuestCopy
+	files, _ := filepath.Glob(filepath.Join(a.paths.Data, "guests", "*.json"))
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		var g GuestCopy
+		if err != nil || json.Unmarshal(b, &g) != nil || g.Host == "" || g.World == "" {
+			continue
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
+// castLooks: up to 4 of a world's cast for the cover, in what they wore last. The living first, then most hours.
+func castLooks(c *WorldCast) []CastLook {
+	if c == nil {
+		return nil
+	}
+	list := append([]CastMember(nil), c.Cast...)
+	sort.SliceStable(list, func(i, j int) bool {
+		if list[i].Alive != list[j].Alive {
+			return list[i].Alive
+		}
+		return list[i].Hours > list[j].Hours
+	})
+	var out []CastLook
+	for _, m := range list {
+		if m.Look != nil && len(out) < 4 {
+			out = append(out, *m.Look)
+		}
+	}
+	return out
 }

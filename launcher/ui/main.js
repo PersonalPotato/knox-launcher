@@ -15,6 +15,7 @@ import { SquadPoster } from "./poster.js";
 import { UpdateBar, VersionLine } from "./update.js";
 import { ShelfHome } from "./shelf.js";
 import { NavTape, TapeMaker } from "./tapes.js";
+import { Customize } from "./customize.js";
 import { sound, soundOn, setSound } from "./sound.js";
 
 const I = (d) => html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d=${d} /></svg>`;
@@ -25,6 +26,7 @@ const TABS = [
   { id: "community", name: "Community", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8", page: Community },
   { id: "world", name: "World", icon: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20", page: World },
   { id: "loadout", name: "Loadout", icon: "M6 7h12l1 14H5L6 7zM9 7V5a3 3 0 0 1 6 0v2", page: Loadout },
+  { id: "customize", name: "Customize", icon: "M12 2l3 7h7l-5.5 4.5 2 7.5L12 17l-6.5 4 2-7.5L2 9h7z", page: Customize },
   { id: "settings", name: "Settings", icon: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6", page: Settings },
   { id: "backups", name: "Backups", icon: "M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l4 2", page: Backups, hide: true }, // opened from the Backups tile on Home
 ];
@@ -147,11 +149,13 @@ function App() {
   if (!S.cfg || !S.state) return html`<div class="boot"><div class="spinner"></div>Starting Knox Launcher...</div>`;
   const tab = TABS.find((t) => t.id === S.tab) || TABS[0];
   const Page = tab.page;
+  const accent = (S.cfg.prefs && S.cfg.prefs.accent) || "";
+  if ((document.documentElement.dataset.accent || "") !== accent) document.documentElement.dataset.accent = accent;
   // no tape in and not in anyone's lobby or game: the shelf (or making a tape) fills the window
   const st = S.state;
   const shelf = !S.tape && !inLobby() && !(st.game && st.game.running) && st.phase !== "ingame" && !["creating", "joining", "syncing", "launching"].includes(st.phase);
   if (S.making || shelf) return html`<div id="app" class="shelf-app">
-    <main id="main" ref=${main}><${UpdateBar} /><${ZBBar} />${S.making ? html`<${TapeMaker} key=${S.making.edit ? S.making.edit.name : "new"} edit=${S.making.edit} />` : html`<${ShelfHome} />`}</main>
+    <main id="main" ref=${main}><${UpdateBar} /><${ZBBar} />${S.making ? html`<${TapeMaker} key=${S.making.edit ? S.making.edit.name : "new"} edit=${S.making.edit} />` : S.customizing ? html`<${Customize} />` : html`<${ShelfHome} />`}</main>
     <${SyncOverlay} />
     <${Modal} />
     ${!S.cat && !S.catErr ? html`<div id="splash"><${TitleArt} /><div class="splash-box"><h1 class="wordmark">KNOX LAUNCHER</h1><div class="spinner"></div><small>Reading your game files</small></div></div>` : null}

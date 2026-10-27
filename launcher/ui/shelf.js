@@ -2,7 +2,7 @@
 // now have a tape you can join, and the blank tape makes a new one. Pick a tape to put it in the VCR.
 import { html, useEffect, useMemo, useState, S, update, rpc, act } from "./core.js";
 import { ShelfView, shelfAspect } from "./vhs3d.js";
-import { shelfSpine, shelfFaces, tapeTitle, tapeLabel } from "./looks.js";
+import { shelfSpine, shelfFaces, tapeTitle, tapeLabel, tapeLook } from "./looks.js";
 import { drawCover, drawBack, drawSpine, image, tbaFig, fonts, SPINE, W, H } from "./tape.js";
 import { useFriends } from "./play.js";
 import { NavLevel } from "./knox.js";
@@ -53,6 +53,17 @@ async function friendFaces(f) {
   return { front: front.canvas, mask: front.mask, back, spine: await friendSpine(f) };
 }
 
+// sortTapes: the shelf order you picked (the server sends last played first)
+function sortTapes(tapes, sort) {
+  const list = [...tapes];
+  if (sort === "name") list.sort((a, b) => tapeTitle(a).localeCompare(tapeTitle(b)));
+  else if (sort === "solo" || sort === "squad") {
+    const first = sort === "solo" ? "solo" : "world";
+    list.sort((a, b) => (a.kind === first ? 0 : 1) - (b.kind === first ? 0 : 1));
+  }
+  return list;
+}
+
 export function ShelfHome() {
   const [tapes, setTapes] = useState(null);
   const [page, setPage] = useState(0);
@@ -63,6 +74,7 @@ export function ShelfHome() {
   const [reload, setReload] = useState(0);
   const [code, setCode] = useState("");
   const st = S.state || {};
+  const prefs = (S.cfg && S.cfg.prefs) || {};
   const friends = useFriends(true);
   const hosting = friends.filter((f) => f.lobby && f.lobby !== "0");
   const online = friends.filter((f) => f.online).length;
@@ -82,12 +94,14 @@ export function ShelfHome() {
     return [
       { id: "new", kind: "new", spine: blankSpine() },
       ...hosting.filter((f) => !known.has(f.id)).map((f) => ({ id: "f:" + f.id, kind: "friend", f, out: true, spine: friendSpine(f) })),
-      ...tapes.map((t, i) => {
+      ...sortTapes(tapes, prefs.sort).map((t, i) => {
         const f = live(t);
-        return { id: t.kind + ":" + (t.host || t.mode || "") + "/" + t.name, kind: "own", t, i, f, out: !!f, spine: f ? joinSticker(shelfSpine(t, i)) : shelfSpine(t, i) };
+        const lk = tapeLook(t);
+        return { id: t.kind + ":" + (t.host || t.mode || "") + "/" + t.name, kind: "own", t, i, f, out: !!f, spine: f ? joinSticker(shelfSpine(t, i)) : shelfSpine(t, i),
+          case: lk.case, caseInk: lk.caseInk };
       }),
     ];
-  }, [tapes, lookKey, hostKey]);
+  }, [tapes, lookKey, hostKey, prefs.sort]);
   const per = PER_ROW * ROWS;
   const pages = Math.max(1, Math.ceil(all.length / per));
   useEffect(() => { if (page > 0 && page >= pages) setPage(pages - 1); }, [pages]);
@@ -170,6 +184,7 @@ export function ShelfHome() {
       <span class="grow"></span>
       <input type="text" class="sh-code" placeholder="Paste a KNOX- code" value=${code} onInput=${(e) => setCode(e.target.value)} onKeyDown=${(e) => e.key === "Enter" && code.trim() && join({ code })} />
       <button class="btn sm" disabled=${!code.trim() || busy} onClick=${() => join({ code })}>Join</button>
+      <button class="btn sm" onClick=${() => { sound("button"); update({ customizing: true }); }}>Customize</button>
       ${bin && bin.length ? html`<button class=${"btn sm" + (binOpen ? " primary" : " ghost")} onClick=${() => setBinOpen(!binOpen)}>Bin (${bin.length})</button>` : null}
     </header>
     ${!steamOK ? html`<div class="card note-card bad sh-note">Steam isn't connected (${st.steam && st.steam.error}). Open Steam and <a href="#" onClick=${(e) => { e.preventDefault(); act(() => rpc("connectSteam"), "Connected to Steam"); }}>try again</a>.</div>` : null}
@@ -182,7 +197,7 @@ export function ShelfHome() {
     </div>` : null}
     <div class="sh-shelf">
       ${tapes === null ? html`<div class="hint">Loading your tapes...</div>` : html`<div class=${"shelf-wrap" + (sel ? " holding" : "")} style=${{ aspectRatio: String(ASPECT), maxWidth: `calc((100vh - 160px) * ${ASPECT})` }}>
-        <${ShelfView} tapes=${shown} perRow=${PER_ROW} rows=${ROWS} picked=${picked} onPick=${(id) => { sound("clack"); setPicked(id); }} faces=${faces} />
+        <${ShelfView} tapes=${shown} perRow=${PER_ROW} rows=${ROWS} prefs=${prefs} picked=${picked} onPick=${(id) => { sound("clack"); setPicked(id); }} faces=${faces} />
         ${card}
       </div>`}
       ${pages > 1 ? html`<div class="sh-pages"><button class="btn sm" disabled=${page === 0} onClick=${() => { setPicked(null); setPage(page - 1); }}>‹ Back</button><span class="muted small">Shelf ${page + 1} of ${pages}</span><button class="btn sm" disabled=${page >= pages - 1} onClick=${() => { setPicked(null); setPage(page + 1); }}>Next ›</button></div>` : null}

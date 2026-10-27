@@ -99,6 +99,7 @@ type Config struct {
 	Knox         KnoxData                  `json:"knox"`
 	Look         Look                      `json:"look"`            // your tape and poster looks
 	Tapes        map[string]TapeMeta       `json:"tapes,omitempty"` // each tape's own title and cover (tapes.go)
+	Prefs        Prefs                     `json:"prefs"`           // shelf and launcher looks (look.go)
 }
 
 // SettingsPreset is a snapshot of the host's world (sandbox) and server (ini) settings.

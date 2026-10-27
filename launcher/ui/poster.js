@@ -64,7 +64,7 @@ export function PosterFig({ m, c, seed }) {
       const w = Math.max(100, el.clientWidth || 230), h = Math.max(100, el.clientHeight || 280);
       const bg = document.createElement("canvas");
       bg.width = w * 2; bg.height = h * 2;
-      await drawPoster(bg.getContext("2d"), { style: look.poster, ink: look.posterInk, name: c && c.forename ? `${c.forename} ${c.surname}` : m.name, seed: m.id });
+      await drawPoster(bg.getContext("2d"), { style: look.poster, ink: look.posterInk, headline: look.headline, name: c && c.forename ? `${c.forename} ${c.surname}` : m.name, seed: m.id });
       if (alive) el.style.backgroundImage = `url(${bg.toDataURL("image/jpeg", 0.88)})`;
     };
     paint();
@@ -81,7 +81,7 @@ export function PosterFig({ m, c, seed }) {
       renderer.setSize(w, h);
       st.fit(w, h);
       // posters with a headline leave room above the head
-      const head = ["wanted", "missing", "propaganda", "mugshot", "comic", "fightcard"].includes(look.poster);
+      const head = ["wanted", "missing", "propaganda", "mugshot", "comic", "fightcard", "onesheet", "card", "obit", "newspaper", "graffiti"].includes(look.poster) || !!look.headline;
       st.camera.position.z += head ? -0.12 : -0.35;
       if (head) st.camera.position.y += 0.3;
       renderer.render(st.scene, st.camera);
@@ -96,7 +96,7 @@ export function PosterFig({ m, c, seed }) {
       renderer.forceContextLoss();
       if (renderer.domElement.parentNode) renderer.domElement.remove();
     };
-  }, [S.cat && S.cat.version, c && JSON.stringify(c), pose.anim, look.poster, look.posterInk]);
+  }, [S.cat && S.cat.version, c && JSON.stringify(c), pose.anim, look.poster, look.posterInk, look.headline]);
   return html`<div class="poster-fig" ref=${box}></div>`;
 }
 

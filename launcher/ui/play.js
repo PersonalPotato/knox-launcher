@@ -7,7 +7,7 @@ import { ChosenStory, respawnText, findStory, livesOf } from "./start.js";
 import { PreviouslyOn } from "./prev.js";
 import { JavaBanner } from "./mods.js";
 import { SquadPoster, SquadTitle, PosterFig } from "./poster.js";
-import { frameOf } from "./looks.js";
+import { frameOf, wornOf, lookOf } from "./looks.js";
 import { sound } from "./sound.js";
 import { LevelTag, BadgeShelf, knoxOf } from "./knox.js";
 import { TapeHome, ejectTape } from "./tapes.js";
@@ -283,9 +283,9 @@ function MemberSlot({ m, story }) {
   return html`<div class=${"slot" + (m.me ? " me" : "") + (m.ready ? " ready" : "") + (frame ? " frame-" + frame : "")} onClick=${() => (m.me ? update({ tab: "character" }) : update({ modal: { kind: "inspect", id: m.id } }))} title=${m.me ? "Edit your survivor" : "Inspect"}>
     ${m.host ? html`<span class="slot-tag">HOST</span>` : null}
     ${m.me ? html`<span class="slot-edit">Edit</span>` : null}
-    <div class="slot-fig">${c ? html`<${PosterFig} m=${m} c=${c} seed=${(S.state && S.state.lobby) || "lobby"} />` : html`<div class="slot-none">No survivor yet</div>`}</div>
+    <div class="slot-fig">${c ? html`<${PosterFig} m=${m} c=${wornOf(m) || c} seed=${(S.state && S.state.lobby) || "lobby"} />` : html`<div class="slot-none">No survivor yet</div>`}</div>
     <div class="slot-info">
-      <div class="sname">${c && c.forename ? `${c.forename} ${c.surname}` : m.name}</div>
+      <div class=${"sname" + (lookOf(m).plate ? " plate-" + lookOf(m).plate : "")}>${c && c.forename ? `${c.forename} ${c.surname}` : m.name}</div>
       <div class="ssub">${m.name}${m.me ? " (you)" : ""}${c ? " · " + profName(c.profession) : ""}${role ? " · " + role : ""}</div>
       <${LevelTag} k=${knoxOf(m)} small />
       ${state}

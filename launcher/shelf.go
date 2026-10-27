@@ -10,25 +10,26 @@ import (
 )
 
 type ShelfTape struct {
-	Kind     string   `json:"kind"` // "solo" or "world"
-	Mode     string   `json:"mode,omitempty"`
-	Name     string   `json:"name"`
-	Played   int64    `json:"played"`
-	Thumb    bool     `json:"thumb,omitempty"`
-	Games    int      `json:"games"`
-	Kills    int      `json:"kills"`
-	Deaths   int      `json:"deaths"`
-	BestDay  int      `json:"bestDay"`
-	Hours    float64  `json:"hours"`
-	Cast     []string `json:"cast,omitempty"` // everyone who played in it, most games first
-	Story    string   `json:"story,omitempty"`
-	Town     string   `json:"town,omitempty"`
-	Backups  int      `json:"backups,omitempty"`
-	Title    string   `json:"title,omitempty"` // the tape's own title (tapes.go)
-	Look     *Look    `json:"look,omitempty"`  // the tape's own cover; nil = your default look
-	Fresh    bool     `json:"fresh,omitempty"` // made on the shelf, not played yet
-	Host     string   `json:"host,omitempty"`  // guest tapes: the host's Steam ID and name
-	HostName string   `json:"hostName,omitempty"`
+	Kind      string     `json:"kind"` // "solo" or "world"
+	Mode      string     `json:"mode,omitempty"`
+	Name      string     `json:"name"`
+	Played    int64      `json:"played"`
+	Thumb     bool       `json:"thumb,omitempty"`
+	Games     int        `json:"games"`
+	Kills     int        `json:"kills"`
+	Deaths    int        `json:"deaths"`
+	BestDay   int        `json:"bestDay"`
+	Hours     float64    `json:"hours"`
+	Cast      []string   `json:"cast,omitempty"` // everyone who played in it, most games first
+	Story     string     `json:"story,omitempty"`
+	Town      string     `json:"town,omitempty"`
+	Backups   int        `json:"backups,omitempty"`
+	Title     string     `json:"title,omitempty"` // the tape's own title (tapes.go)
+	Look      *Look      `json:"look,omitempty"`  // the tape's own cover; nil = your default look
+	Fresh     bool       `json:"fresh,omitempty"` // made on the shelf, not played yet
+	Host      string     `json:"host,omitempty"`  // guest tapes: the host's Steam ID and name
+	HostName  string     `json:"hostName,omitempty"`
+	CastLooks []CastLook `json:"castLooks,omitempty"` // who goes on the cover, in their in-game clothes
 }
 
 func (a *App) shelf() []ShelfTape {
@@ -50,6 +51,7 @@ func (a *App) shelf() []ShelfTape {
 		}
 		t := ShelfTape{Kind: "world", Name: w.Name, Played: w.Played, Backups: w.Backups}
 		fill(&t, func(g GameRecord) bool { return g.World == w.Name && (g.Host == "" || g.Host == me) })
+		t.CastLooks = castLooks(a.castFor(w.Name))
 		out = append(out, t)
 	}
 	metas := a.cfg.Get().Tapes
@@ -114,6 +116,27 @@ func (a *App) guestTapes(games []GameRecord) []ShelfTape {
 				t.HostName = p.Name
 			}
 		}
+	}
+	// worlds you were in a lobby for: the host's title, cover and cast as last seen
+	for _, c := range a.guestCopies() {
+		k := c.Host + "/" + c.World
+		t := byKey[k]
+		if t == nil {
+			t = &ShelfTape{Kind: "guest", Name: c.World, Host: c.Host, Played: c.Seen}
+			byKey[k] = t
+			keys = append(keys, k)
+		}
+		if c.Title != "" {
+			t.Title = c.Title
+		}
+		if c.HostName != "" {
+			t.HostName = c.HostName
+		}
+		if c.Look != nil {
+			l := *c.Look
+			t.Look = &l
+		}
+		t.CastLooks = castLooks(c.Cast)
 	}
 	var out []ShelfTape
 	for _, k := range keys {
