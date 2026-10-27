@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -50,6 +51,7 @@ type ModInfo struct {
 	Java         bool     `json:"java,omitempty"`
 	Pending      bool     `json:"pending,omitempty"` // subscribed, still downloading
 	roots        []string // content folders (common + version folder)
+	translation  bool     // the game counts it as a translation mod (see joinOrder)
 	jar          string   // Java mods: the jar ZombieBuddy loads
 }
 
@@ -250,7 +252,81 @@ func orderMods(c *Catalog, set map[string]bool) []string {
 	for _, id := range ids {
 		visit(id, 0)
 	}
+	return joinOrder(c, out)
+}
+
+// joinOrder puts the list in the order a joining game will really load it, so the host's server
+// loads the Lua in that same order. When the game joins a server it loads "translation mods"
+// from mods/default.txt first (ZomboidFileSystem.loadTranslationMods), each with its requirements,
+// and only then the server's list; ZombieBuddy then moves itself back to the front. If the server
+// loaded the mods in another order, Lua files land in a different order on each side and the
+// checksum kicks the player with "File doesn't exist on the client" for whichever file moved
+// (seen with Improved Hair Menu's color picker, whose version folder has no files, ahead of Viewpoint).
+// Running the list through this twice gives the same list, so host and guests agree.
+func joinOrder(c *Catalog, ids []string) []string {
+	var lead []string
+	for _, id := range ids {
+		if m := c.mod(id); m != nil && m.translation {
+			lead = append(lead, id)
+		}
+	}
+	if len(lead) == 0 {
+		return ids
+	}
+	set := map[string]bool{}
+	for _, id := range ids {
+		set[id] = true
+	}
+	toLoad := append(lead, ids...)
+	if set[pinnedMods[0]] {
+		toLoad = append([]string{pinnedMods[0]}, toLoad...)
+	}
+	placed := map[string]bool{}
+	out := make([]string, 0, len(ids))
+	var add func(id string, depth int)
+	add = func(id string, depth int) {
+		if placed[id] || !set[id] || depth > 50 {
+			return
+		}
+		if m := c.mod(id); m != nil {
+			for _, r := range m.Require {
+				add(r, depth+1)
+			}
+		}
+		if !placed[id] {
+			placed[id] = true
+			out = append(out, id)
+		}
+	}
+	for _, id := range toLoad {
+		add(id, 0)
+	}
 	return out
+}
+
+// isTranslationMod is the game's test: every file under media/ (in the common and the version
+// folder) is a .txt or .json in media/lua/shared/translate/. A mod with no files at all counts too.
+func isTranslationMod(roots []string) bool {
+	for _, root := range roots {
+		media := filepath.Join(root, "media")
+		only := true
+		_ = filepath.WalkDir(media, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			rel, _ := filepath.Rel(root, path)
+			rel = strings.ToLower(filepath.ToSlash(rel))
+			if !strings.HasPrefix(rel, "media/lua/shared/translate/") || !(strings.HasSuffix(rel, ".txt") || strings.HasSuffix(rel, ".json")) {
+				only = false
+				return fs.SkipAll
+			}
+			return nil
+		})
+		if !only {
+			return false
+		}
+	}
+	return true
 }
 
 var defaultModRe = regexp.MustCompile(`(?m)^\s*mod\s*=\s*\\?([^,\r\n]+?)\s*,?\s*$`)
