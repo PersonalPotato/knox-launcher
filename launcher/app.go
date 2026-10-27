@@ -22,7 +22,7 @@ import (
 	"unicode/utf8"
 )
 
-const appVersion = "2.6"
+const appVersion = "2.7"
 
 type App struct {
 	paths  Paths

@@ -36,10 +36,11 @@ type realSteam struct {
 	calls   map[uint64]int // async call handle -> expected callback id
 	waiters map[uint64]chan []byte // async call handle -> whoever waits for its result (nil on failure)
 	avatar  map[uint64][]byte
+	asked   map[uint64]time.Time // friend lobbies whose data we requested
 }
 
 func newSteam(dllPath string) Steam {
-	return &realSteam{dllPath: dllPath, events: make(chan SteamEvent, 1024), calls: map[uint64]int{}, waiters: map[uint64]chan []byte{}, avatar: map[uint64][]byte{}}
+	return &realSteam{dllPath: dllPath, events: make(chan SteamEvent, 1024), calls: map[uint64]int{}, waiters: map[uint64]chan []byte{}, avatar: map[uint64][]byte{}, asked: map[uint64]time.Time{}}
 }
 
 func (s *realSteam) proc(name string) *syscall.Proc {
@@ -290,12 +291,29 @@ func (s *realSteam) Friends() (out []Friend) {
 			if truthy(s.call("SteamAPI_ISteamFriends_GetFriendGamePlayed", s.friend, uintptr(id), uintptr(unsafe.Pointer(&info[0])))) {
 				game := le64(info[:], 0)
 				f.InGame = game&0xffffff == PZAppID
-				f.Lobby = le64(info[:], 16)
+				if lobby := le64(info[:], 16); f.InGame && lobby != 0 && s.knoxLobby(lobby) {
+					f.Lobby = lobby // only Knox Launcher lobbies become JOIN tapes, not Spacewar or vanilla PZ
+				}
 			}
 			out = append(out, f)
 		}
 	})
 	return
+}
+
+// knoxLobby reports whether a friend's lobby carries the Knox Launcher marker
+// (lobby data "ez"="1"). Data for a lobby we are not in arrives after
+// RequestLobbyData, so an unknown lobby is asked for (once a minute) and hidden
+// until then. Called with s.mu held.
+func (s *realSteam) knoxLobby(lobby uint64) bool {
+	if gostr(s.call("SteamAPI_ISteamMatchmaking_GetLobbyData", s.mm, uintptr(lobby), uintptr(cstr("ez")))) == "1" {
+		return true
+	}
+	if time.Since(s.asked[lobby]) > time.Minute {
+		s.asked[lobby] = time.Now()
+		s.call("SteamAPI_ISteamMatchmaking_RequestLobbyData", s.mm, uintptr(lobby))
+	}
+	return false
 }
 
 func (s *realSteam) Avatar(id uint64) []byte {
