@@ -176,3 +176,30 @@ func killOrphanServers(pidFile string) int {
 	}
 	return 1
 }
+
+type memoryStatusEx struct {
+	Length               uint32
+	MemoryLoad           uint32
+	TotalPhys            uint64
+	AvailPhys            uint64
+	TotalPageFile        uint64
+	AvailPageFile        uint64
+	TotalVirtual         uint64
+	AvailVirtual         uint64
+	AvailExtendedVirtual uint64
+}
+
+var procGlobalMemoryStatusEx = windows.NewLazySystemDLL("kernel32.dll").NewProc("GlobalMemoryStatusEx")
+
+// memoryLine describes the PC's memory for the log: RAM in use, and how much more can be
+// committed before Windows has to page hard (the page file counts toward that).
+func memoryLine() string {
+	var m memoryStatusEx
+	m.Length = uint32(unsafe.Sizeof(m))
+	if r, _, _ := procGlobalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&m))); r == 0 {
+		return "memory: unknown"
+	}
+	gb := func(b uint64) string { return strconv.FormatFloat(float64(b)/(1<<30), 'f', 1, 64) }
+	return "memory: RAM " + strconv.Itoa(int(m.MemoryLoad)) + "% used, " + gb(m.AvailPhys) + " of " + gb(m.TotalPhys) +
+		" GB free; commit " + gb(m.AvailPageFile) + " of " + gb(m.TotalPageFile) + " GB free"
+}

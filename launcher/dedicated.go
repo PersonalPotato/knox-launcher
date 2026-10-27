@@ -275,6 +275,9 @@ func (a *App) serverCommand(world string, memory int) (*exec.Cmd, error) {
 		"-Dzomboid.steam=1",
 		"-Djava.awt.headless=true",
 		"-XX:-OmitStackTraceInFastThrow",
+		// garbage collection pauses, to tell a server freeze from a PC freeze (Logs\server-gc.txt)
+		// (quoted, since the drive letter's colon would end the file name otherwise)
+		"-Xlog:gc:file=\"" + filepath.Join(a.paths.Zomboid, "Logs", "server-gc.txt") + "\":time,uptime:filecount=2,filesize=5m",
 	}
 	// Knox Link's helper: runs ZombieBuddy (server-side Java mods) and reuses the host's Workshop folders
 	if agent, zb := a.knoxAgentJar(), filepath.Join(game, "ZombieBuddy.jar"); agent != "" && exists(zb) {
