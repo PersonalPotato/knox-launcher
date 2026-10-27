@@ -124,13 +124,18 @@ end
 Events.OnInitGlobalModData.Add(function()
     data = ModData.getOrCreate("KnoxLinkLobby")
     local open, town, expected, kit, respawn = readFlag()
+    local fromLauncher = respawn and respawn.rule and respawn.rule ~= ""
     if open then
         data.open = true
         data.town = town
         data.expected = expected
+    elseif fromLauncher then
+        -- continuing a world: no lobby, even if the last session closed before its countdown
+        data.open = false
     end
-    if kit ~= "" then data.kit = kit end
-    if respawn and respawn.rule and respawn.rule ~= "" then
+    -- the launcher always sends the kit line: an empty one means no starting kit any more
+    if kit ~= "" or fromLauncher then data.kit = kit end
+    if fromLauncher then
         data.respawn = respawn.rule:gsub("%s", "")
         data.base = parseSpot(respawn.base) or data.base
         local spots = {}

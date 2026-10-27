@@ -118,7 +118,12 @@ function KnoxGoals.init(d)
         if not data.goalsDone[def.id] and not data.goalsLong[def.id] then data.goalsLong[def.id] = make(def, "long") end
     end
     local sd = STORY[data.story or ""]
-    if sd and not data.goalsDone[sd.id] then data.goalsStory = data.goalsStory or make(sd, "story") else data.goalsStory = nil end
+    if sd and not data.goalsDone[sd.id] then
+        -- keep the progress of this story's goal, but a different story gets its own
+        if not data.goalsStory or data.goalsStory.id ~= sd.id then data.goalsStory = make(sd, "story") end
+    else
+        data.goalsStory = nil
+    end
     local seed = ZombRand(1000)
     local squadDef = pick(SQUAD, seed)
     session.squad = make(squadDef, "squad")

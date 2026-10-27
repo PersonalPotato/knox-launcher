@@ -61,6 +61,7 @@ type Lobby struct {
 	phase   string
 	id      uint64
 	isHost  bool
+	owner   uint64 // the host when you joined (Steam hands the lobby to a guest when the host leaves)
 	chat    []ChatLine
 	sync    SyncState
 	note    string            // last problem shown to the user
@@ -134,6 +135,7 @@ func (l *Lobby) Create() error {
 	if err := l.app.steamReady(); err != nil {
 		return err
 	}
+	l.leaveQuiet() // one lobby at a time: the old one would stay joined in the background
 	l.set(func() { l.phase, l.isHost, l.chat, l.note, l.mine = PhaseCreating, true, nil, "", nil })
 	l.app.steam.CreateLobby(16)
 	return nil
@@ -152,7 +154,7 @@ func (l *Lobby) Join(id uint64) error {
 func (l *Lobby) leaveQuiet() {
 	l.mu.Lock()
 	id := l.id
-	l.id, l.isHost, l.mine = 0, false, nil
+	l.id, l.isHost, l.mine, l.owner = 0, false, nil, 0
 	if l.phase != PhaseInGame {
 		l.phase = PhaseIdle
 	}
@@ -208,8 +210,9 @@ func (l *Lobby) onEvent(e SteamEvent) {
 				l.phase = PhaseLobby
 			}
 		})
-		host := st.LobbyOwner(e.Lobby) == st.MyID()
-		l.set(func() { l.isHost = host })
+		owner := st.LobbyOwner(e.Lobby)
+		host := owner == st.MyID()
+		l.set(func() { l.isHost, l.owner = host, owner })
 		l.app.publishMyData()
 		st.SetRichPresence("status", "In a Knox Launcher lobby")
 		if l.IsHost() {
@@ -238,6 +241,7 @@ func (l *Lobby) onEvent(e SteamEvent) {
 		}
 	case EvLobbyChanged:
 		if e.Lobby == l.ID() {
+			l.checkHostLeft()
 			l.checkLaunch()
 		}
 	case EvJoinRequested:
@@ -346,6 +350,23 @@ func (l *Lobby) SetReady(ready bool) {
 	}
 }
 
+// checkHostLeft takes a guest out of a lobby whose host left. Steam would hand the lobby to a guest,
+// which leaves a lobby nobody can start.
+func (l *Lobby) checkHostLeft() {
+	l.mu.Lock()
+	id, host, owner := l.id, l.isHost, l.owner
+	l.mu.Unlock()
+	if id == 0 || host || owner == 0 {
+		return
+	}
+	if now := l.app.steam.LobbyOwner(id); now == 0 || now == owner {
+		return
+	}
+	log.Printf("lobby %d: the host left", id)
+	l.leaveQuiet()
+	l.set(func() { l.note = "The host left, so the lobby closed." })
+}
+
 // checkLaunch reacts to the host starting the game.
 func (l *Lobby) checkLaunch() {
 	id := l.ID()
@@ -389,6 +410,7 @@ func (l *Lobby) run() {
 		}
 		slow++
 		if slow%40 == 0 && l.ID() != 0 {
+			l.checkHostLeft()
 			l.checkLaunch()
 		}
 	}

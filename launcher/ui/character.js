@@ -3,6 +3,7 @@ import { html, useState, S, update, rpc, act, toast, saveCharacter, loadConfig, 
 import { CharacterView } from "./viewer.js";
 import { StorySection, WhereYouStart } from "./start.js";
 import { castMe } from "./prev.js";
+import { SkillList, skillOf, sortTraits } from "./skills.js";
 
 const FIRST_M = ["Jack", "Wes", "Ray", "Dale", "Earl", "Travis", "Hank", "Cody", "Bill", "Floyd", "Gus", "Roy", "Luke", "Darryl"];
 const FIRST_F = ["Jess", "Darla", "Kim", "June", "Tammy", "Lori", "Rose", "Faye", "Nina", "Becky", "Marla", "Joan", "Sue", "Ellie"];
@@ -47,10 +48,18 @@ function blockedBy(c, t) {
   return null;
 }
 
+function pref(k, d) {
+  try { return localStorage.getItem(k) || d; } catch { return d; }
+}
+
 export function xpOf(c) {
   const xp = {};
   const prof = S.cat.profById[c.profession];
-  for (const src of [prof, ...(c.traits || []).map((id) => S.cat.traitById[id])]) for (const x of (src && src.xp) || []) xp[x.perk] = (xp[x.perk] || 0) + x.level;
+  for (const src of [prof, ...(c.traits || []).map((id) => S.cat.traitById[id])]) for (const x of (src && src.xp) || []) {
+    const s = skillOf(x);
+    xp[s.id] = xp[s.id] || { ...s, level: 0 };
+    xp[s.id].level += x.level;
+  }
   return xp;
 }
 
@@ -100,6 +109,7 @@ export function ensureDefaults(c) {
 export function Character() {
   const [search, setSearch] = useState("");
   const [lookTab, setLookTab] = useState("body");
+  const [hideBlocked, setHideBlocked] = useState(false);
   if (!S.cat) return html`<${Empty} title="Loading game files...">One sec.</${Empty}>`;
   const c = S.cfg.character;
   if (ensureDefaults(c)) saveCharacter();
@@ -119,9 +129,16 @@ export function Character() {
   });
 
   const q = search.toLowerCase();
-  const visible = (t) => !t.free && t.cost !== 0 && (!q || t.name.toLowerCase().includes(q));
-  const good = S.cat.traits.filter((t) => visible(t) && t.cost > 0).sort((a, b) => a.name.localeCompare(b.name));
-  const bad = S.cat.traits.filter((t) => visible(t) && t.cost < 0).sort((a, b) => a.name.localeCompare(b.name));
+  const traitSort = pref("knox-trait-sort", "group");
+  const traitFrom = pref("knox-trait-from", "all");
+  const hasModTraits = S.cat.traits.some((t) => t.mod && !t.free);
+  const visible = (t) => !t.free && t.cost !== 0 && (!q || t.name.toLowerCase().includes(q))
+    && (traitFrom === "all" || !hasModTraits || (traitFrom === "mods") === !!t.mod)
+    && (!hideBlocked || c.traits.includes(t.id) || !blockedBy(c, t));
+  const good = sortTraits(S.cat.traits.filter((t) => visible(t) && t.cost > 0), traitSort);
+  const bad = sortTraits(S.cat.traits.filter((t) => visible(t) && t.cost < 0), traitSort);
+  const traitGroups = (groups) => groups.map(([g, list]) => html`${g ? html`<div key=${"h" + g} class="trait-head">${g}</div>` : null}${list.map(traitRow)}`);
+  const setSort = (k, v) => { try { localStorage.setItem(k, v); } catch {} update(); };
   const traitRow = (t) => {
     const on = c.traits.includes(t.id);
     const blocked = on ? null : blockedBy(c, t);
@@ -213,7 +230,7 @@ export function Character() {
             ${c.traits.map((id) => S.cat.traitById[id]).filter(Boolean).map((t) => html`<span key=${t.id} class=${"chip " + (t.cost > 0 ? "good" : "bad")}>${t.name}</span>`)}
             ${!granted.length && !c.traits.length ? html`<span class="hint">No traits.</span>` : null}
           </div>
-          ${Object.keys(xp).length ? html`<div class="xp" style=${{ marginTop: "10px" }}>${Object.entries(xp).map(([k, v]) => html`<span key=${k} class="chip accent">${k} ${v > 0 ? "+" : ""}${v}</span>`)}</div>` : null}
+          <${SkillList} xp=${xp} />
         </div>
       </div>
     </div></section>` : null}
@@ -227,17 +244,23 @@ export function Character() {
           </div>
           ${freePoints() ? html`<div class="hint" style=${{ marginTop: "6px" }}>+${freePoints()} from world settings.</div>` : null}
           ${pts < 0 ? html`<div class="chip bad" style=${{ marginTop: "8px" }}>Not enough points. The game won't accept this.</div>` : null}
+          <div class="row trait-sort">
+            <span class="muted small">Sort</span>
+            <div class="seg">${[["group", "Group"], ["cost", "Cost"], ["name", "A-Z"]].map(([k, l]) => html`<button key=${k} class=${traitSort === k ? "on" : ""} onClick=${() => setSort("knox-trait-sort", k)}>${l}</button>`)}</div>
+            ${hasModTraits ? html`<div class="seg">${[["all", "All"], ["game", "Game"], ["mods", "Mods"]].map(([k, l]) => html`<button key=${k} class=${traitFrom === k ? "on" : ""} onClick=${() => setSort("knox-trait-from", k)}>${l}</button>`)}</div>` : null}
+            <label class="row small muted" style=${{ gap: "6px" }}><${Switch} on=${hideBlocked} onChange=${setHideBlocked} /> Hide blocked</label>
+          </div>
           <div class="sep"></div>
           <div class="chosen">
             ${granted.map((t) => html`<span key=${"g" + t.id} class="chip" title="From your job">★ ${t.name}</span>`)}
             ${c.traits.map((id) => S.cat.traitById[id]).filter(Boolean).map((t) => html`<span key=${t.id} class=${"chip click " + (t.cost > 0 ? "good" : "bad")} onClick=${() => change(() => (c.traits = c.traits.filter((x) => x !== t.id)))}>${t.name} ✕</span>`)}
             ${!granted.length && !c.traits.length ? html`<span class="hint">No traits.</span>` : null}
           </div>
-          ${Object.keys(xp).length ? html`<div class="xp" style=${{ marginTop: "10px" }}>${Object.entries(xp).map(([k, v]) => html`<span key=${k} class="chip accent">${k} ${v > 0 ? "+" : ""}${v}</span>`)}</div>` : null}
+          <${SkillList} xp=${xp} />
         </div>
         <div class="trait-cols">
-          <div class="card"><h3>Good traits</h3><div class="trait-list">${good.map(traitRow)}</div></div>
-          <div class="card"><h3>Bad traits</h3><div class="trait-list">${bad.map(traitRow)}</div></div>
+          <div class="card"><h3>Good traits</h3><div class="trait-list">${traitGroups(good)}</div></div>
+          <div class="card"><h3>Bad traits</h3><div class="trait-list">${traitGroups(bad)}</div></div>
         </div>
     </div></section>` : null}
     ${tab === "look" ? html`<section class="section"><div class="char-grid two look">
@@ -336,7 +359,7 @@ export function CharacterSheet({ c, name }) {
         ${traits.map((t) => html`<span key=${t.id} class=${"chip " + (t.cost > 0 ? "good" : "bad")} title=${stripTags(t.desc)}>${t.name}</span>`)}
         ${!granted.length && !traits.length ? html`<span class="hint">No traits.</span>` : null}
       </div>
-      ${Object.keys(xp).length ? html`<h3 style=${{ marginTop: "14px" }}>Skills</h3><div class="xp">${Object.entries(xp).map(([k, v]) => html`<span key=${k} class="chip accent">${k} ${v > 0 ? "+" : ""}${v}</span>`)}</div>` : null}
+      ${Object.values(xp).some((s) => s.level) ? html`<h3 style=${{ marginTop: "14px" }}>Skills</h3><${SkillList} xp=${xp} />` : null}
       <h3 style=${{ marginTop: "14px" }}>Wearing</h3>
       <div class="chosen">${Object.values(c.clothing || {}).filter(Boolean).map((id) => html`<span key=${id} class="chip">${(S.cat.itemById[id] || {}).name || id}</span>`)}</div>
     </div>

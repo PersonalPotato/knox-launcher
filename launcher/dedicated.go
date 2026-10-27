@@ -45,6 +45,10 @@ type coopServer struct {
 	// portFail: the last start died because the network port wouldn't open (try another port)
 	portFail bool
 	port     int
+	// logOff, logHead: size and first bytes of coop-console.txt before this run, so an appended
+	// old run is told apart from this one
+	logOff  int64
+	logHead []byte
 }
 
 func (s *coopServer) get() ServerState {
@@ -126,6 +130,11 @@ func (a *App) StartServer(world string, memory int) error {
 	if err != nil {
 		return err
 	}
+	var logOff int64
+	var logHead []byte
+	if b, err := os.ReadFile(filepath.Join(a.paths.Zomboid, "coop-console.txt")); err == nil {
+		logOff, logHead = int64(len(b)), b[:min(len(b), 512)]
+	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("couldn't start the server: %v", err)
 	}
@@ -133,6 +142,7 @@ func (a *App) StartServer(world string, memory int) error {
 	log.Printf("server starting: %s", world)
 	srv.mu.Lock()
 	srv.cmd, srv.in = cmd, in
+	srv.logOff, srv.logHead = logOff, logHead
 	srv.state = ServerState{Running: true, Stage: "starting", Text: "Starting", Started: time.Now().Unix(), World: world}
 	srv.mu.Unlock()
 	go a.readServer(cmd, out)
@@ -151,10 +161,9 @@ func (a *App) readServer(cmd *exec.Cmd, out io.Reader) {
 			log.Println("server: network start failed:", line)
 			srv.mu.Lock()
 			srv.portFail = true
-			if srv.port != 0 {
-				badPorts[srv.port], badPorts[srv.port+1] = true, true
-			}
+			port := srv.port
 			srv.mu.Unlock()
+			markBadPort(port)
 			srv.set(func(st *ServerState) {
 				st.Error = "The server couldn't open its network port. Another server or game may still be using it. Close it, or restart your PC, then press START again."
 			})
@@ -514,12 +523,27 @@ func luaValue(v string) string {
 }
 
 // badPorts are ports a server failed to open this session (RakNet said "in use" though a test bind worked).
-var badPorts = map[int]bool{}
+var badPorts = struct {
+	sync.Mutex
+	m map[int]bool
+}{m: map[int]bool{}}
+
+func markBadPort(p int) {
+	if p == 0 {
+		return
+	}
+	badPorts.Lock()
+	badPorts.m[p], badPorts.m[p+1] = true, true
+	badPorts.Unlock()
+}
 
 // freeServerPorts finds a free pair of UDP ports for the server, starting at the game's 16261/16262.
 func freeServerPorts() (int, int) {
 	free := func(p int) bool {
-		if badPorts[p] {
+		badPorts.Lock()
+		bad := badPorts.m[p]
+		badPorts.Unlock()
+		if bad {
 			return false
 		}
 		c, err := net.ListenPacket("udp4", "0.0.0.0:"+strconv.Itoa(p))
@@ -577,9 +601,7 @@ func (a *App) watchServerLog(cmd *exec.Cmd) {
 		port := a.server.port
 		a.server.portFail = true
 		a.server.mu.Unlock()
-		if port != 0 {
-			badPorts[port], badPorts[port+1] = true, true
-		}
+		markBadPort(port)
 		log.Printf("server: couldn't open network port %d, stopping it", port)
 		a.server.set(func(st *ServerState) {
 			st.Error = "The server couldn't open its network port. Another program may be using it. Press START to try again on a different port."

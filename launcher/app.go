@@ -689,8 +689,11 @@ func (a *App) hostLaunch(expected int, launchID string) error {
 	if err := a.syncItems(m, true); err != nil {
 		return err
 	}
-	a.lobby.setMyData("sync", "done:"+launchID)
-	// timestamps can change while Steam updates an item: the server must send the ones on disk now
+	if err := a.ownCopyMismatch(c, ids); err != nil {
+		return err
+	}
+	// timestamps can change while Steam updates an item: the server must send the ones on disk now,
+	// and friends check their copies against them (a newer copy than the host's can't join)
 	for i := range m.Items {
 		if n, err := strconv.ParseUint(m.Items[i].ID, 10, 64); err == nil {
 			if _, ts, ok := a.steam.ItemInstallInfo(n); ok {
@@ -698,6 +701,12 @@ func (a *App) hostLaunch(expected int, launchID string) error {
 			}
 		}
 	}
+	if id := a.lobby.ID(); id != 0 {
+		if mb, err := json.Marshal(m); err == nil {
+			setLobbyBig(a.steam, id, "manifest", string(mb))
+		}
+	}
+	a.lobby.setMyData("sync", "done:"+launchID)
 	if err := writeDefaultMods(a.paths, ids); err != nil {
 		return fmt.Errorf("couldn't write the mod list: %v", err)
 	}
@@ -863,6 +872,7 @@ func (a *App) waitForServerAndFriends(launchID string) error {
 // who gets the admin powers Knox Link needs). If the host never shows, friends are sent in anyway.
 func (a *App) waitForHostIn(id uint64, launchID string) {
 	tell := func(msg string) {
+		a.steam.SetLobbyData(id, "hostin", "")
 		a.steam.SetLobbyData(id, "serverid", a.server.get().SteamID)
 		a.steam.SetLobbyData(id, "server", launchID)
 		a.steam.SendLobbyMessage(id, "go:"+launchID)
@@ -871,6 +881,8 @@ func (a *App) waitForHostIn(id uint64, launchID string) {
 	}
 	// friends never wait on the host's own game for long: the server being up is what matters
 	deadline := time.Now().Add(90 * time.Second)
+	a.steam.SetLobbyData(id, "hostin", strconv.FormatInt(deadline.Unix(), 10))
+	defer a.steam.SetLobbyData(id, "hostin", "")
 	for time.Now().Before(deadline) {
 		if a.lobby.ID() != id || !a.server.get().Running {
 			return
@@ -1012,8 +1024,26 @@ func (a *App) guestLaunch(lobby uint64) {
 
 // syncItems subscribes to and downloads every Workshop item in the manifest, and waits for them.
 // For the host (own=true) it only updates items that Steam says are out of date.
+// Cancel, leaving the lobby, or (for a guest) the host stopping the start ends the wait.
 func (a *App) syncItems(m Manifest, own bool) error {
 	st := a.steam
+	lobby := a.lobby.ID()
+	launch := ""
+	if lobby != 0 && !own {
+		launch = st.LobbyData(lobby, "launch")
+	}
+	stopped := func() error {
+		if a.lobby.ID() != lobby {
+			return errors.New("left the lobby")
+		}
+		if a.lobby.takeCancel() {
+			return errors.New("Start cancelled.")
+		}
+		if launch != "" && (st.LobbyData(lobby, "state") != "launching" || st.LobbyData(lobby, "launch") != launch) {
+			return errors.New("The host's start stopped.")
+		}
+		return nil
+	}
 	type item struct {
 		id   uint64
 		name string
@@ -1036,6 +1066,35 @@ func (a *App) syncItems(m Manifest, own bool) error {
 		}
 	}
 	a.lobby.set(func() { a.lobby.sync = SyncState{Total: len(items)} })
+	// the host asks the Workshop for each item's latest version: Steam doesn't always know a mod was
+	// updated, and a friend with the newer copy gets kicked ("Lua checksums do not match")
+	outdated := map[uint64]bool{}
+	if q, ok := st.(interface{ ItemUpdated(uint64) (uint32, error) }); ok && own {
+		a.lobby.set(func() { a.lobby.sync.Current = "Checking the Workshop for updates" })
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 8)
+		// own uploads too: the copy friends get must be the one START compares yours with
+		for i := range items {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				latest, err := q.ItemUpdated(items[i].id)
+				_, ts, ok := st.ItemInstallInfo(items[i].id)
+				if err != nil || !ok || latest <= ts {
+					return
+				}
+				mu.Lock()
+				items[i].ts = latest
+				outdated[items[i].id] = true
+				mu.Unlock()
+				log.Printf("sync: %s (%d) has a newer version on the Workshop", items[i].name, items[i].id)
+			}(i)
+		}
+		wg.Wait()
+	}
 	for _, it := range items {
 		// own uploads still get updated when Steam has them installed: the server tells joining games
 		// the installed copy's timestamp, so a half-updated copy makes the host's own game refuse to join
@@ -1047,7 +1106,7 @@ func (a *App) syncItems(m Manifest, own bool) error {
 			st.SubscribeItem(it.id)
 		}
 		_, ts, _ := st.ItemInstallInfo(it.id)
-		if state&ItemInstalled == 0 || state&ItemNeedsUpdate != 0 || (!own && it.ts != 0 && ts < it.ts) {
+		if state&ItemInstalled == 0 || state&ItemNeedsUpdate != 0 || (it.ts != 0 && ts < it.ts) {
 			st.DownloadItem(it.id, true)
 		}
 	}
@@ -1064,7 +1123,7 @@ func (a *App) syncItems(m Manifest, own bool) error {
 			state := st.ItemState(it.id)
 			_, ts, ok := st.ItemInstallInfo(it.id)
 			finished := ok && state&ItemInstalled != 0 && state&(ItemNeedsUpdate|ItemDownloading|ItemDownloadPending) == 0
-			if !own && finished && it.ts != 0 && ts < it.ts {
+			if (!own || outdated[it.id]) && finished && it.ts != 0 && ts < it.ts {
 				finished = false
 			}
 			if own && state&ItemSubscribed == 0 && ok {
@@ -1075,14 +1134,35 @@ func (a *App) syncItems(m Manifest, own bool) error {
 			}
 			if state&(ItemDownloading|ItemDownloadPending) != 0 {
 				busy[it.id] = true
-			} else if !finished && busy[it.id] && ok && state&ItemInstalled != 0 {
+			} else if !finished && busy[it.id] && ok && state&ItemInstalled != 0 && (it.ts == 0 || ts >= it.ts) {
 				// the download finished, but Steam leaves "needs update" set while the game's app id
 				// is running (the launcher uses it), so count it as done
 				finished = true
 			}
 			// Steam sometimes flags an item for an update and then never downloads it. After a while,
 			// use the copy that's installed instead of waiting forever.
-			if !finished && ok && state&ItemInstalled != 0 && state&(ItemDownloading|ItemDownloadPending) == 0 && time.Since(start) > 40*time.Second {
+			// a mod the Workshop says is out of date blocks the start: friends with the new copy can't join an old one
+			if outdated[it.id] && !finished && time.Since(start) > 2*time.Minute && state&(ItemDownloading|ItemDownloadPending) == 0 {
+				return fmt.Errorf("%s has an update on the Workshop, but Steam won't download it. Friends with the new version can't join. Restart Steam and press START again.", it.name)
+			}
+			// a friend can't join with a newer copy than the host's (Lua checksums don't match). The host
+			// may still be updating it, so wait for the host's mods, then check the host's final list.
+			if !own && ok && it.ts != 0 && ts > it.ts && state&(ItemDownloading|ItemDownloadPending) == 0 {
+				finished = false
+				if latest, hostDone := a.hostItemTS(it.id); hostDone {
+					if latest != 0 && ts > latest {
+						return fmt.Errorf("%s is newer on your PC than on the host's. The host needs to update it: restart Steam, then press START again.", it.name)
+					}
+					for i := range items {
+						if items[i].id == it.id {
+							items[i].ts = latest
+						}
+					}
+					finished = latest == 0 || ts == latest
+				}
+			}
+			wait := 40 * time.Second
+			if !finished && !outdated[it.id] && ok && state&ItemInstalled != 0 && state&(ItemDownloading|ItemDownloadPending) == 0 && time.Since(start) > wait {
 				finished = true
 				if !stale[it.id] {
 					stale[it.id] = true
@@ -1120,6 +1200,9 @@ func (a *App) syncItems(m Manifest, own bool) error {
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("Steam didn't finish downloading %s. Check Steam and try again.", current)
+		}
+		if err := stopped(); err != nil {
+			return err
 		}
 		time.Sleep(time.Second)
 	}
@@ -1212,6 +1295,15 @@ func (a *App) checkGame() {
 
 func (a *App) shutdown() {
 	a.lobby.Leave()
+	// the window is closed: let a running server save the world before the launcher goes
+	// (Windows kills it with the launcher otherwise, losing everything since the last autosave)
+	if a.server.get().Running {
+		log.Println("closing: saving and stopping the server")
+		a.server.Stop()
+		for end := time.Now().Add(45 * time.Second); a.server.get().Running && time.Now().Before(end); {
+			time.Sleep(250 * time.Millisecond)
+		}
+	}
 	a.steam.Shutdown()
 }
 
@@ -1483,5 +1575,37 @@ func (a *App) hostConnected() bool {
 	if err != nil {
 		return false
 	}
+	// an older run's lines can still be at the top if the server appends to the log
+	a.server.mu.Lock()
+	off, head := a.server.logOff, a.server.logHead
+	a.server.mu.Unlock()
+	if off > 0 && off <= int64(len(b)) && bytes.HasPrefix(b, head) {
+		b = b[off:]
+	}
 	return bytes.Contains(b, []byte("isCoopHost=true")) || bytes.Contains(b, []byte("Connected new client"))
+}
+
+// hostItemTS says whether the host's mods are ready for this start and, if so, the version (install
+// timestamp) of one Workshop item in the host's final mod list.
+func (a *App) hostItemTS(item uint64) (uint32, bool) {
+	id := a.lobby.ID()
+	if id == 0 {
+		return 0, false
+	}
+	owner := a.steam.LobbyOwner(id)
+	// "done:" from an earlier start doesn't count: the host may still be updating this one
+	if launch := a.steam.LobbyData(id, "launch"); launch == "" || a.steam.MemberData(id, owner, "sync") != "done:"+launch {
+		return 0, false
+	}
+	var m Manifest
+	if json.Unmarshal([]byte(lobbyBig(a.steam, id, "manifest")), &m) != nil {
+		return 0, false
+	}
+	want := strconv.FormatUint(item, 10)
+	for _, it := range m.Items {
+		if it.ID == want {
+			return it.TS, true
+		}
+	}
+	return 0, true
 }

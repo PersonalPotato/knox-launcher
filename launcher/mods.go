@@ -175,10 +175,28 @@ func resolveMods(c *Catalog, want []string) (ids []string, problems map[string]s
 	if c.usable(knoxLinkID) {
 		set[knoxLinkID] = true
 	}
-	for id := range set {
+	// two mods that can't run together: the one earlier in the load order stays, the other is left out
+	// (with whatever needs it), the same way Knox Link does it in game. Knox Link itself always stays.
+	for _, id := range orderMods(c, set) {
+		if !set[id] {
+			continue
+		}
 		for _, x := range c.mod(id).Incompatible {
-			if set[x] {
-				problems[id] = "Doesn't work together with " + x
+			if !set[x] {
+				continue
+			}
+			drop, keep := x, id
+			if x == knoxLinkID {
+				drop, keep = id, x
+			}
+			delete(set, drop)
+			problems[drop] = "Doesn't work together with " + c.mod(keep).Name
+			for _, d := range c.dependentsOf(drop, set) {
+				delete(set, d)
+				problems[d] = "Needs " + c.mod(drop).Name + ", which was left out"
+			}
+			if drop == id {
+				break
 			}
 		}
 	}

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 type RGB struct {
@@ -130,7 +132,12 @@ func loadConfig(dir string) *ConfigStore {
 	}
 	if b, err := os.ReadFile(s.path); err == nil {
 		b = bytes.ReplaceAll(b, []byte(`"`+oldKnoxLinkID+`"`), []byte(`"`+knoxLinkID+`"`))
-		_ = json.Unmarshal(b, &s.cfg)
+		if err := json.Unmarshal(b, &s.cfg); err != nil && len(bytes.TrimSpace(b)) > 0 {
+			// keep the file: the next save would overwrite everything that didn't load
+			bad := s.path + ".unreadable-" + time.Now().Format("2006-01-02_15-04-05")
+			_ = os.WriteFile(bad, b, 0644)
+			log.Printf("config.json didn't load (%v), kept a copy as %s", err, filepath.Base(bad))
+		}
 	}
 	if s.cfg.Presets == nil {
 		s.cfg.Presets = map[string]Character{}

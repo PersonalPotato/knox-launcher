@@ -807,3 +807,20 @@ select.ed-add { padding: 2px 6px; font-size: 12px; border-radius: 999px; height:
 .comm-say { gap: 8px; margin-bottom: 10px; }
 .tag-input { gap: 6px; flex-wrap: wrap; align-items: center; }
 .tag-input .tag-new { width: 140px; padding: 3px 10px; font-size: 12.5px; border-radius: 999px; height: auto; }
+
+/* trait groups and skill list */
+.trait-sort { gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.trait-sort .seg button { padding: 4px 10px; font-size: 12px; }
+.trait-head { grid-column: 1 / -1; font: 700 11px Inter, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 8px 0 2px; }
+.trait-head:first-child { margin-top: 0; }
+.skills { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 14px; margin-top: 10px; }
+.skill-group { display: grid; gap: 3px; align-content: start; }
+.skill-head { font: 700 11px Inter, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.skill { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.skill .sk-name { flex: 1; }
+.skill .pips { display: inline-flex; gap: 2px; }
+.skill .pips i { width: 6px; height: 10px; background: #2a2e33; border-radius: 1px; }
+.skill .pips i.on { background: var(--accent); }
+.skill.neg .pips i.on { background: #b44; }
+.skill .sk-lv { width: 22px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.skill.neg .sk-lv { color: #d66; }

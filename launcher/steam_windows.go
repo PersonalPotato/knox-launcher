@@ -39,7 +39,7 @@ type realSteam struct {
 }
 
 func newSteam(dllPath string) Steam {
-	return &realSteam{dllPath: dllPath, events: make(chan SteamEvent, 64), calls: map[uint64]int{}, waiters: map[uint64]chan []byte{}, avatar: map[uint64][]byte{}}
+	return &realSteam{dllPath: dllPath, events: make(chan SteamEvent, 1024), calls: map[uint64]int{}, waiters: map[uint64]chan []byte{}, avatar: map[uint64][]byte{}}
 }
 
 func (s *realSteam) proc(name string) *syscall.Proc {
@@ -54,14 +54,20 @@ func (s *realSteam) proc(name string) *syscall.Proc {
 	return p
 }
 
+// uintptrescapes keeps every pointer turned into a uintptr in a call's arguments (a key string, a local
+// buffer) alive and in place until the DLL returns. Without it the garbage collector or a stack move
+// can free or shift that memory mid-call.
+//
+//go:uintptrescapes
 func (s *realSteam) call(name string, args ...uintptr) uintptr {
 	r, _, _ := s.proc(name).Call(args...)
 	return r
 }
 
-func cstr(v string) uintptr {
+// cstr makes a C string. Pass it as uintptr(cstr(v)) right in s.call's arguments so it stays alive.
+func cstr(v string) unsafe.Pointer {
 	b, _ := syscall.BytePtrFromString(v)
-	return uintptr(unsafe.Pointer(b))
+	return unsafe.Pointer(b)
 }
 
 func gostr(p uintptr) string {
@@ -362,13 +368,13 @@ func (s *realSteam) LobbyMembers(lobby uint64) (out []uint64) {
 }
 
 func (s *realSteam) LobbyData(lobby uint64, key string) (v string) {
-	s.locked(func() { v = gostr(s.call("SteamAPI_ISteamMatchmaking_GetLobbyData", s.mm, uintptr(lobby), cstr(key))) })
+	s.locked(func() { v = gostr(s.call("SteamAPI_ISteamMatchmaking_GetLobbyData", s.mm, uintptr(lobby), uintptr(cstr(key)))) })
 	return
 }
 
 func (s *realSteam) SetLobbyData(lobby uint64, key, value string) (ok bool) {
 	s.locked(func() {
-		ok = truthy(s.call("SteamAPI_ISteamMatchmaking_SetLobbyData", s.mm, uintptr(lobby), cstr(key), cstr(value)))
+		ok = truthy(s.call("SteamAPI_ISteamMatchmaking_SetLobbyData", s.mm, uintptr(lobby), uintptr(cstr(key)), uintptr(cstr(value))))
 	})
 	return
 }
@@ -383,14 +389,14 @@ func (s *realSteam) SetLobbyJoinable(lobby uint64, joinable bool) {
 
 func (s *realSteam) MemberData(lobby, member uint64, key string) (v string) {
 	s.locked(func() {
-		v = gostr(s.call("SteamAPI_ISteamMatchmaking_GetLobbyMemberData", s.mm, uintptr(lobby), uintptr(member), cstr(key)))
+		v = gostr(s.call("SteamAPI_ISteamMatchmaking_GetLobbyMemberData", s.mm, uintptr(lobby), uintptr(member), uintptr(cstr(key))))
 	})
 	return
 }
 
 func (s *realSteam) SetMemberData(lobby uint64, key, value string) {
 	s.locked(func() {
-		s.call("SteamAPI_ISteamMatchmaking_SetLobbyMemberData", s.mm, uintptr(lobby), cstr(key), cstr(value))
+		s.call("SteamAPI_ISteamMatchmaking_SetLobbyMemberData", s.mm, uintptr(lobby), uintptr(cstr(key)), uintptr(cstr(value)))
 	})
 }
 
@@ -407,7 +413,7 @@ func (s *realSteam) RequestLobbyData(lobby uint64) {
 }
 
 func (s *realSteam) SetRichPresence(key, value string) {
-	s.locked(func() { s.call("SteamAPI_ISteamFriends_SetRichPresence", s.friend, cstr(key), cstr(value)) })
+	s.locked(func() { s.call("SteamAPI_ISteamFriends_SetRichPresence", s.friend, uintptr(cstr(key)), uintptr(cstr(value))) })
 }
 
 func (s *realSteam) ItemState(item uint64) (st uint32) {
@@ -517,10 +523,10 @@ func (s *realSteam) QueryWorkshop(q WorkshopQuery) (WorkshopPage, error) {
 			return
 		}
 		if t := strings.TrimSpace(q.Text); t != "" {
-			s.call("SteamAPI_ISteamUGC_SetSearchText", s.ugc, uintptr(qh), cstr(t))
+			s.call("SteamAPI_ISteamUGC_SetSearchText", s.ugc, uintptr(qh), uintptr(cstr(t)))
 		}
 		if q.Tag != "" {
-			s.call("SteamAPI_ISteamUGC_AddRequiredTag", s.ugc, uintptr(qh), cstr(q.Tag))
+			s.call("SteamAPI_ISteamUGC_AddRequiredTag", s.ugc, uintptr(qh), uintptr(cstr(q.Tag)))
 		}
 		if kind == 3 {
 			s.call("SteamAPI_ISteamUGC_SetRankedByTrendDays", s.ugc, uintptr(qh), 7)

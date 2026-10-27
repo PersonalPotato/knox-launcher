@@ -7,6 +7,7 @@ require "KnoxLink/KnoxLink_Json"
 require "OptionScreens/MainScreen"
 require "OptionScreens/CharacterCreationProfession"
 require "OptionScreens/CharacterCreationMain"
+require "OptionScreens/MapSpawnSelect"
 require "OptionScreens/ConnectToServer"
 require "OptionScreens/ServerSettingsScreen"
 
@@ -434,7 +435,7 @@ function A.host(L)
     KnoxLink.writeLines("lobby.txt", { L.lobby or "1", L.town or "", L.expected or "0", L.loadout or "",
         L.respawn or "base", L.spawn or "", L.respawnSpots or "" })
 
-    A.pendingCharacter = L.character
+    A.wantCharacter(L.character)
     KnoxLink.launch(name, tonumber(L.memory) or 4096)
 end
 
@@ -480,7 +481,7 @@ function A.solo(L)
     end
     getWorld():setWorld(sanitizeWorldName(L.world or "Solo"))
     ms.bottomPanel:setVisible(false)
-    A.pendingCharacter = L.character
+    A.wantCharacter(L.character)
     ms.charCreationProfession.previousScreen = "NewGameScreen"
     ms.charCreationProfession:setVisible(true)
 end
@@ -553,7 +554,7 @@ end
 
 function A.joinGame(L)
     A.join = { host = L.host, hostName = L.hostName or "host", tries = 0, max = tonumber(L.tries) or 45 }
-    A.pendingCharacter = L.character
+    A.wantCharacter(L.character)
     A.tryJoin()
 end
 
@@ -563,6 +564,7 @@ local function onConnectFailed(message)
     if J.tries >= J.max then
         A.join = nil
         status(nil)
+        A.clearCharacter()
         return
     end
     J.waiting = 8 * 30 -- ticks
@@ -573,19 +575,34 @@ Events.OnConnected.Add(function()
     if A.join then A.join = nil; status(nil) end
 end)
 
--- Character: the app saves it as the "Knox Launcher" preset in the game's own preset files.
+-- Character: the app saves it as the "Knox Launcher" preset in the game's own preset files
+-- (saved_builds.txt = job + traits, saved_outfits.txt = looks). When the creator opens, Knox Link
+-- loads that preset and clicks through it behind a cover, so the player never sees the screens.
+-- Skills come with the job and traits, the same way the game's own creator gives them.
+-- Joining or hosting reloads Lua with the server's mods, which wipes memory, so the request is
+-- kept in app_character.txt (preset name + time) until the character exists.
 
-A.charStep = nil
+local CHAR_FILE = "app_character.txt"
+local CHAR_MAX_AGE = 1800 -- seconds; a join can sit on "waiting for the server" for a while
 
-local oldProfVisible = CharacterCreationProfession.setVisible
-function CharacterCreationProfession:setVisible(visible, joypadData)
-    oldProfVisible(self, visible, joypadData)
-    if visible and A.pendingCharacter and A.pendingCharacter ~= "" then
-        A.charStep = { stage = "build", wait = 3 }
-    end
+function A.wantCharacter(name)
+    if not name or name == "" then return end
+    KnoxLink.writeLines(CHAR_FILE, { name, tostring(getTimestamp()) })
 end
 
-local function hasPreset(file, name, sep)
+local function wantedCharacter()
+    local lines = KnoxLink.readLines(CHAR_FILE)
+    if not lines or not lines[1] or lines[1] == "" then return nil end
+    if (tonumber(lines[2]) or 0) < getTimestamp() - CHAR_MAX_AGE then return nil end
+    return lines[1]
+end
+
+function A.clearCharacter()
+    KnoxLink.writeLines(CHAR_FILE, {})
+end
+local clearCharacter = A.clearCharacter
+
+local function hasPreset(file, name)
     local reader = getFileReader(file, false)
     if not reader then return false end
     local found = false
@@ -598,39 +615,174 @@ local function hasPreset(file, name, sep)
     return found
 end
 
+-- Black screen with one line while the creator clicks itself through.
+local function cover(show)
+    if not show then
+        if A.cover then
+            A.cover:setVisible(false)
+            A.cover:removeFromUIManager()
+            A.cover = nil
+        end
+        return
+    end
+    if not A.cover then
+        local core = getCore()
+        local panel = ISPanel:new(0, 0, core:getScreenWidth(), core:getScreenHeight())
+        panel.backgroundColor = { r = 0, g = 0, b = 0, a = 1 }
+        panel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+        panel:initialise()
+        panel.render = function(self)
+            self:drawTextCentre("Loading your survivor...", self.width / 2, self.height / 2, 0.82, 0.55, 1, 1, UIFont.Medium)
+        end
+        panel:addToUIManager()
+        panel:setAlwaysOnTop(true)
+        A.cover = panel
+    end
+    A.cover:setVisible(true)
+    A.cover:bringToTop()
+end
+
+A.charStep = nil
+
+local function stopCharacter(why)
+    if A.charStep and why then KnoxLink.log("character: " .. why) end
+    A.charStep = nil
+    cover(false)
+end
+
+-- The creator screens that belong together: the main menu ones, or the in-game respawn ones.
+local function creatorScreens(prof)
+    local coop = CoopCharacterCreation and CoopCharacterCreation.instance
+    if coop and coop.charCreationProfession == prof then return prof, coop.charCreationMain, true end
+    local ms = MainScreen.instance
+    return prof, ms and ms.charCreationMain, false
+end
+
+local function startCharacter(prof, name, respawn)
+    local _, main, coop = creatorScreens(prof)
+    if not main then return end
+    if not hasPreset("saved_builds.txt", name) then
+        KnoxLink.log("character: no \"" .. name .. "\" preset in saved_builds.txt, leaving the creator open")
+        return
+    end
+    A.charStep = { stage = "build", wait = 2, ticks = 0, name = name, prof = prof, main = main, coop = coop, respawn = respawn }
+    cover(true)
+end
+
+-- In multiplayer the server's spawn list can have more than one region. The launcher already
+-- picked the start building (SpawnPoint), so take the default and go straight to the creator.
+local oldSpawnVisible = MapSpawnSelect.setVisible
+function MapSpawnSelect:setVisible(visible, joypadData)
+    oldSpawnVisible(self, visible, joypadData)
+    if visible and self == MapSpawnSelect.instance and not A.charStep and wantedCharacter()
+        and MainScreen.instance and not MainScreen.instance.inGame then
+        A.charStep = { stage = "spawn", wait = 2, ticks = 0, spawn = self }
+        cover(true)
+    end
+end
+
+local oldProfVisible = CharacterCreationProfession.setVisible
+function CharacterCreationProfession:setVisible(visible, joypadData)
+    oldProfVisible(self, visible, joypadData)
+    if not visible then return end
+    if A.charStep and A.charStep.stage ~= "spawn" then return end
+    A.charStep = nil
+    local name = wantedCharacter()
+    if name then
+        startCharacter(self, name, false)
+    elseif isClient() and CoopCharacterCreation and CoopCharacterCreation.instance
+        and CoopCharacterCreation.instance.charCreationProfession == self then
+        -- respawning on a Knox server: the next life is the launcher character again
+        startCharacter(self, PRESET, true)
+    else
+        cover(false)
+    end
+end
+
+local function selectedTraits(prof)
+    local have = {}
+    for _, v in ipairs(prof.listboxTraitSelected and prof.listboxTraitSelected.items or {}) do
+        pcall(function() have[v.item:getType():getName()] = true end)
+    end
+    return have
+end
+
+-- Log what didn't make it, so a bad preset shows up in console.txt.
+local function checkBuild(S)
+    local reader = getFileReader("saved_builds.txt", false)
+    local build
+    while reader do
+        local line = reader:readLine()
+        if not line then break end
+        if luautils.stringStarts(line, S.name .. ":") then build = string.sub(line, #S.name + 2) end
+    end
+    if reader then reader:close() end
+    local parts = luautils.split(build or "", ";")
+    local job = "?"
+    pcall(function() job = S.prof.profession:getType():getName() end)
+    local have, missing = selectedTraits(S.prof), {}
+    for i = 2, #parts do
+        if parts[i] ~= "" and not have[parts[i]] then table.insert(missing, parts[i]) end
+    end
+    local text = "job " .. tostring(job) .. (parts[1] and job ~= parts[1] and (" (wanted " .. parts[1] .. ")") or "")
+    if #missing > 0 then text = text .. ", traits not added: " .. table.concat(missing, ", ") end
+    return text
+end
+
 local function stepCharacter()
     local S = A.charStep
     if not S then return end
+    S.ticks = S.ticks + 1
+    if S.ticks > 600 then return stopCharacter("gave up, creator left open") end
     if S.wait > 0 then S.wait = S.wait - 1 return end
-    local name = A.pendingCharacter or PRESET
-    if S.stage == "build" then
-        local prof = CharacterCreationProfession.instance
-        if not prof or not prof:isVisible() then A.charStep = nil return end
-        if hasPreset("saved_builds.txt", name) then
-            pcall(CharacterCreationProfession.loadBuild, prof, { options = { name }, selected = 1 })
-        end
-        prof:onOptionMouseDown({ internal = "NEXT" })
-        S.stage, S.wait = "outfit", 3
+    if S.stage == "spawn" then
+        if not S.spawn:isVisible() then return stopCharacter("spawn screen closed") end
+        -- clickNext opens the creator, whose setVisible starts the character steps
+        S.spawn:clickNext()
+        if A.charStep == S then stopCharacter("no creator after the spawn screen") end
+    elseif S.stage == "build" then
+        if not S.prof:isVisible() then return stopCharacter("creator closed") end
+        CharacterCreationProfession.loadBuild(S.prof, { options = { S.name }, selected = 1 })
+        S.prof:checkXPBoost()
+        S.result = checkBuild(S)
+        S.prof:onOptionMouseDown({ internal = "NEXT" })
+        S.stage, S.wait = "outfit", 2
     elseif S.stage == "outfit" then
-        local main = CharacterCreationMain.instance
-        if not main or not main:isVisible() then A.charStep = nil return end
-        if hasPreset("saved_outfits.txt", name) then
-            pcall(main.loadOutfit, main, { options = { name }, selected = 1 })
+        -- the respawn creator opens CharacterCreationMain.instance, which may not be the one we expected
+        local other = CharacterCreationMain.instance
+        if not S.main:isVisible() and other and other:isVisible() then S.main = other end
+        if not S.main:isVisible() then return stopCharacter("looks screen didn't open") end
+        if hasPreset("saved_outfits.txt", S.name) then
+            S.main:loadOutfit({ options = { S.name }, selected = 1 })
+        end
+        -- creator mods' own sliders (Size Matters height, body shape...), set from the launcher
+        for field, value in pairs(A.readKV("app_extras.txt") or {}) do
+            local control, n = S.main[field], tonumber(value)
+            if control and n and control.setCurrentValue then pcall(control.setCurrentValue, control, n, true) end
         end
         S.stage, S.wait = "play", 2
     elseif S.stage == "play" then
-        local main = CharacterCreationMain.instance
+        if not S.main:isVisible() then return stopCharacter("looks screen closed") end
+        local who = tostring(S.main.forenameEntry:getText()) .. " " .. tostring(S.main.surnameEntry:getText())
+        KnoxLink.log("character: " .. (S.respawn and "respawn as " or "loaded ") .. who .. ", " .. tostring(S.result))
         A.charStep = nil
-        A.pendingCharacter = nil
-        -- creator mods' own sliders (Size Matters height, body shape...), set from the launcher
-        local extras = main and A.readKV("app_extras.txt")
-        for field, value in pairs(extras or {}) do
-            local control, n = main[field], tonumber(value)
-            if control and n and control.setCurrentValue then pcall(control.setCurrentValue, control, n, true) end
-        end
-        if main and main:isVisible() then main:onOptionMouseDown({ internal = "NEXT" }) end
+        if not S.respawn then clearCharacter() end
+        S.main:onOptionMouseDown({ internal = "NEXT" })
+        cover(false)
     end
 end
+
+local function safeStep()
+    if not A.charStep then return end
+    local ok, err = pcall(stepCharacter)
+    if not ok then stopCharacter("failed (" .. tostring(err) .. "), creator left open") end
+end
+A.stepCharacter = safeStep
+
+-- A returning survivor skips the creator: the request is done once a game is running.
+Events.OnGameStart.Add(function()
+    if not A.charStep then clearCharacter() end
+end)
 
 -- Main menu tick: called by KnoxLink_MainMenu after the mod sync settled.
 function A.onMenuReady()
@@ -655,8 +807,10 @@ Events.OnFETick.Add(function()
             A.tryJoin()
         end
     end
-    stepCharacter()
+    A.stepCharacter()
 end)
+-- respawning in game: the front-end tick doesn't run there
+Events.OnRenderTick.Add(function() A.stepCharacter() end)
 
 -- In game, the host runs commands the app's server panel asks for (kick, ban, message).
 -- app_commands.txt lines: id|command|argument
@@ -669,11 +823,13 @@ Events.OnTick.Add(function()
     commandTicks = 0
     local lines = KnoxLink.readLines("app_commands.txt")
     if not lines then lastCommand = lastCommand or 0 return end
+    -- the first read only learns where the list is, so old commands never replay
+    local first = lastCommand == nil
     for _, line in ipairs(lines) do
         local p = KnoxLink.split(line, "|")
         local id = tonumber(p[1])
         if id and (lastCommand == nil or id > lastCommand) then
-            if lastCommand ~= nil then
+            if not first then
                 local cmd, arg = p[2], (p[3] or ""):gsub("\"", "'")
                 if cmd == "kick" then SendCommandToServer("/kickuser \"" .. arg .. "\"")
                 elseif cmd == "ban" then SendCommandToServer("/banuser \"" .. arg .. "\"")
@@ -684,6 +840,5 @@ Events.OnTick.Add(function()
             lastCommand = id
         end
     end
-    -- the first read only learns where the list is, so old commands never replay
     if lastCommand == nil then lastCommand = 0 end
 end)

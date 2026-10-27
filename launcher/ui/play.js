@@ -336,6 +336,7 @@ export function SyncOverlay() {
     const sv = st.server || {};
     const srvText = st.host ? (sv.running ? sv.text : "Not started") : st.hostServer || "Starting";
     const srvUp = st.host ? sv.stage === "up" : st.hostServer === "Server is up";
+    const hostIn = st.hostIn ? Math.max(0, Math.ceil(st.hostIn - Date.now() / 1000)) : 0;
     const rows = (st.members || []).map((m) => {
       // your own mods are done before waiting starts, and the host's are done before anyone is told to start
       const done = m.me || m.host || (m.sync || "").startsWith("done:") || m.sync === "ready" || m.sync === "launching";
@@ -346,6 +347,7 @@ export function SyncOverlay() {
     return html`<div id="overlay"><div class="wait-wrap"><${SquadPoster} members=${st.members || []} /><div class="sync-box wait-box">
       <h2>Getting everyone ready</h2>
       <div class="muted small" style=${{ marginBottom: "14px" }}>Games open when the server is up and everyone has the mods.</div>
+      ${hostIn > 0 ? html`<div class="wait-row"><span class="wait-ico"><div class="spinner sm"></div></span><b>${st.host ? "Your game" : "Host's game"}</b><span class="grow muted">Loading in. Games open anyway in ${hostIn}s</span></div>` : null}
       <div class="wait-row"><span class=${"wait-ico" + (srvUp ? " ok" : "")}>${srvUp ? "✓" : html`<div class="spinner sm"></div>`}</span><b>${st.host ? "Your server" : "Host's server"}</b><span class="grow muted">${srvText}</span></div>
       ${rows.map((r) => html`<div class="wait-row" key=${r.name}><span class=${"wait-ico" + (r.done ? " ok" : "")}>${r.done ? "✓" : html`<div class="spinner sm"></div>`}</span><b>${r.name}</b>
         <div class="grow"><div class="bar"><i style=${{ width: r.pct + "%" }}></i></div></div><span class="muted small wait-txt">${r.text}</span></div>`)}
@@ -360,6 +362,7 @@ export function SyncOverlay() {
     ${st.phase === "syncing" ? html`<div class="bar" style=${{ margin: "16px 0 6px" }}><i style=${{ width: pct + "%" }}></i></div>
       <div class="small dim">${s.done || 0} of ${s.total || 0} items${s.bytesAll ? " · " + fmtBytes(s.bytes) + " of " + fmtBytes(s.bytesAll) : ""}</div>` : null}
     ${(s.warnings || []).map((w, i) => html`<div key=${i} class="chip warn" style=${{ marginTop: "10px", whiteSpace: "normal" }}>${w}</div>`)}
+    ${st.phase === "syncing" ? html`<button class="btn ghost" style=${{ marginTop: "16px" }} onClick=${() => act(() => rpc("cancelStart"))}>Cancel</button>` : null}
   </div></div>`;
 }
 

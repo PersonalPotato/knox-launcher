@@ -44,6 +44,7 @@ type Catalog struct {
 }
 
 type XPBoost struct {
+	ID    string `json:"id,omitempty"` // script perk id (Woodwork), used to group skills
 	Perk  string `json:"perk"`
 	Level int    `json:"level"`
 }
@@ -860,6 +861,9 @@ func splitIDs(v string) []string {
 	return out
 }
 
+// script perk ids whose translation key has another name
+var perkLangKey = map[string]string{"Lightfoot": "Lightfooted", "Sneak": "Sneaking", "PlantScavenging": "Foraging"}
+
 func parseXP(v string, tr func(string, string) string) []XPBoost {
 	out := []XPBoost{}
 	for _, part := range strings.Split(v, ";") {
@@ -869,7 +873,11 @@ func parseXP(v string, tr func(string, string) string) []XPBoost {
 		}
 		perk := strings.TrimSpace(kv[0])
 		lv, _ := strconv.Atoi(strings.TrimSpace(kv[1]))
-		out = append(out, XPBoost{Perk: tr("IGUI_perks_"+perk, perk), Level: lv})
+		key := perk
+		if a, ok := perkLangKey[perk]; ok {
+			key = a
+		}
+		out = append(out, XPBoost{ID: perk, Perk: tr("IGUI_perks_"+key, key), Level: lv})
 	}
 	return out
 }

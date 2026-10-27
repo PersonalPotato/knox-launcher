@@ -69,6 +69,7 @@ func (a *App) binTape(kind, mode, name string) error {
 		if d := filepath.Join(a.paths.savesDir(), name); exists(d) {
 			moves = append(moves, [2]string{d, "save"})
 		}
+
 	default:
 		return errors.New("unknown tape")
 	}
@@ -88,6 +89,15 @@ func (a *App) binTape(kind, mode, name string) error {
 			}
 			os.RemoveAll(dir)
 			return fmt.Errorf("couldn't move %s (is it open somewhere?)", filepath.Base(m[0]))
+		}
+	}
+	if kind == "world" {
+		// its cast and goals go with it (best effort: they may be on another drive), so a new world
+		// with the same name starts clean
+		for _, f := range []string{a.castFile(name), a.goalsFile(name)} {
+			if exists(f) {
+				_ = os.Rename(f, filepath.Join(dir, "server", filepath.Base(f)))
+			}
 		}
 	}
 	key := tapeKey(kind, mode, name)
@@ -146,6 +156,15 @@ func (a *App) restoreTape(id string) error {
 		os.MkdirAll(filepath.Dir(m[1]), 0755)
 		if err := os.Rename(m[0], m[1]); err != nil {
 			return fmt.Errorf("couldn't put back %s", filepath.Base(m[1]))
+		}
+	}
+	if t.Kind == "world" {
+		for _, f := range []string{a.castFile(t.Name), a.goalsFile(t.Name)} {
+			if from := filepath.Join(dir, "server", filepath.Base(f)); exists(from) {
+				_ = os.MkdirAll(filepath.Dir(f), 0755)
+				_ = os.Remove(f)
+				_ = os.Rename(from, f)
+			}
 		}
 	}
 	if t.Meta != nil {

@@ -802,6 +802,9 @@ func (s *Server) state(since int) map[string]any {
 			out["hostName"] = a.steam.LobbyData(id, "host")
 			out["lobbyState"] = a.steam.LobbyData(id, "state")
 			out["hostServer"] = a.steam.LobbyData(id, "srv")
+			if t, err := strconv.ParseInt(a.steam.LobbyData(id, "hostin"), 10, 64); err == nil {
+				out["hostIn"] = t // when friends' games open even if the host's game isn't in yet
+			}
 		}
 	}
 	if id == 0 {

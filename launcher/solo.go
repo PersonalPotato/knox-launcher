@@ -149,7 +149,7 @@ func (a *App) SoloStart(name string) (string, error) {
 	// read in game once the new character exists
 	lines = append(lines, "world="+world, "spawn="+spawn, "kit="+kitText(h.Kit))
 
-	a.lobby.set(func() { a.lobby.phase, a.lobby.note = PhaseSyncing, "" })
+	a.lobby.set(func() { a.lobby.phase, a.lobby.note, a.lobby.cancel = PhaseSyncing, "", false })
 	go func() {
 		if err := a.soloLaunch(lines, world); err != nil {
 			a.lobby.set(func() { a.lobby.phase, a.lobby.note, a.lobby.sync.Wait = a.lobby.restPhase(), err.Error(), "" })
